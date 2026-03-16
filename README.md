@@ -1,10 +1,12 @@
 ---
 title: 라이나 인사이트 - 보험 상품 분석 솔루션
+short_description: 라이나생명 암보험 특약 비교 분석 플랫폼
 emoji: ⚖️
 colorFrom: green
 colorTo: blue
 sdk: docker
 app_port: 7860
+thumbnail: https://huggingface.co/spaces/minkyyee/insurance-compare/resolve/main/image.png
 ---
 
 # InsureCompare — 보험 특약 비교 AI 솔루션
