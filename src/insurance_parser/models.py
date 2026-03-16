@@ -1,8 +1,4 @@
-"""
-보험 문서 파싱 데이터 모델.
-
-이름 관리:
-  NameRecord → raw_name / display_name / normalized_name / canonical_name
+"""보험 문서 파싱 데이터 모델.
 
 상품 번들:
   ProductBundle → summary_pdf + terms_pdf → BundleStatus
@@ -13,27 +9,6 @@ import enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
-
-
-# ---------------------------------------------------------------------------
-# 이름 관리 모델 (Name Master)
-# ---------------------------------------------------------------------------
-
-class NameRecord(BaseModel):
-    """계약/특약 이름의 4단계 관리 레코드.
-
-    - raw_name: PDF에서 추출한 원본 텍스트
-    - display_name: 줄바꿈·공백 정리된 사람 읽기용 이름
-    - normalized_name: 비교/매칭용 정규화 키 (코드·접두사 제거)
-    - canonical_name: 최종 확정된 표준 이름 (출력 테이블에 사용)
-    """
-    raw_name: str = ""
-    display_name: str = ""
-    normalized_name: str = ""
-    canonical_name: str = ""
-    source: str = ""         # product_summary | terms | toc
-    contract_type: str = "rider"  # 항상 "rider" (비교 단위 = 특약)
-    code: str = ""           # 특약 코드 (KA4.1 등)
 
 
 # ---------------------------------------------------------------------------

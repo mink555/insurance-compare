@@ -1034,7 +1034,6 @@ _EV_TOOLTIP_MAP: dict[str, str] = {}
 def _build_tooltip_map(report) -> None:
     """Evidence ID → tooltip text 맵을 빌드."""
     global _EV_TOOLTIP_MAP
-    import html as html_mod
     _EV_TOOLTIP_MAP = {}
     for ev in _evidence_from_report(report):
         label = f"{ev.side} · {ev.benefit}"
