@@ -17,5 +17,10 @@ build/
 /hanwhalife/
 /linalife/
 /artifacts/
-/insurance_info/
 *.pdf
+*.xls
+*.xlsx
+
+# insurance_info 내 민감/대용량 파일만 제외, 도메인 참조 파일은 포함
+/insurance_info/보장성_*.xls
+/insurance_info/보험_리서치.txt
