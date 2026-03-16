@@ -16,7 +16,6 @@ build/
 /tmp*/
 /hanwhalife/
 /linalife/
-/artifacts/
 *.pdf
 *.xls
 *.xlsx
