@@ -1,3 +1,12 @@
+---
+title: InsureCompare
+emoji: ⚖️
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 7860
+---
+
 # InsureCompare — 보험 특약 비교 AI 솔루션
 
 라이나생명 기준으로 타사(한화생명 등) 암보험 특약을 비교 분석하는 도구.
