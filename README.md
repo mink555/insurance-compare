@@ -1,5 +1,5 @@
 ---
-title: InsureCompare
+title: 라이나 인사이트 - 보험 상품 분석 솔루션
 emoji: ⚖️
 colorFrom: green
 colorTo: blue
