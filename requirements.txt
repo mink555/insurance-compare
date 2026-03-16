@@ -1,0 +1,24 @@
+# PDF 추출
+PyMuPDF
+
+# 데이터 모델
+pydantic>=2.0
+
+# 이름 매칭
+rapidfuzz
+
+# 출력 테이블
+pandas
+
+# UI
+streamlit
+
+# LLM (OpenRouter)
+python-dotenv
+requests
+
+# 벡터 DB (RAG)
+chromadb
+
+# 테스트
+pytest
