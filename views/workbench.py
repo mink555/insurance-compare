@@ -889,7 +889,7 @@ def _render_compare_step(
     rows3 = []
     for row in result.amount_table:
         diff_cls = ' row-diff' if row["status"] in ("당사우위", "타사우위", "금액상이", "조건상이") else ''
-        rat = row.get("rationale", "")
+        rat = row.get("rationale", "") if row.get("status") != "조건상이" else ""
         rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
         rows3.append(
             f'<tr><td class="row-label cell-clamp">{row["our_name"]}</td>'
@@ -1150,7 +1150,7 @@ def _render_rpt_comparison(report, ev_map: dict) -> None:
         a_rows = []
         for row in cr.amount_table:
             diff_cls = ' row-diff' if row["status"] in ("당사우위", "타사우위", "금액상이", "조건상이") else ''
-            rat = row.get("rationale", "")
+            rat = row.get("rationale", "") if row.get("status") != "조건상이" else ""
             rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
             our_eid = _find_eid(ev_map, "당사", "amount", row["our_name"])
             comp_eid = _find_eid(ev_map, "타사", "amount", row["comp_name"])
@@ -1304,7 +1304,7 @@ def _render_rpt_analysis(report, ev_map: dict) -> None:
             d_thead = f'<tr><th>급부</th><th class="col-our">{our_l}</th><th class="col-comp">{comp_l}</th><th class="col-status">판정</th></tr>'
             d_rows = []
             for cp in diff_pairs[:10]:
-                rat = cp.rationale or ""
+                rat = (cp.rationale or "") if cp.overall_advantage != "조건상이" else ""
                 rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
                 our_eid = _find_eid(ev_map, "당사", "amount", cp.our_name)
                 comp_eid = _find_eid(ev_map, "타사", "amount", cp.comp_name)
