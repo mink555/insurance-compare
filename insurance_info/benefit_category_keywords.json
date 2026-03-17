@@ -1,6 +1,6 @@
 {
   "_comment": "보험 종류별 급부 카테고리 분류 키워드 사전. 신상품 추가 시 이 파일만 수정하세요.",
-  "_version": "1.0",
+  "_version": "1.1",
 
   "암보험": {
     "diagnosis": {
@@ -30,6 +30,26 @@
     "premium_waiver": {
       "keywords": ["보험료 납입을 면제", "납입면제"],
       "label_ko": "납입면제"
+    },
+    "examination": {
+      "keywords": ["검사비", "검사비용", "검사자금", "PET", "NGS", "유전자패널", "바늘생검", "조직병리", "양전자단층", "PSMA"],
+      "label_ko": "검사"
+    },
+    "icu": {
+      "keywords": ["중환자실"],
+      "label_ko": "중환자실"
+    },
+    "consultation": {
+      "keywords": ["다학제"],
+      "label_ko": "다학제진료"
+    },
+    "supportive_care": {
+      "keywords": ["통증완화", "항구토", "영양치료", "집중영양"],
+      "label_ko": "지지요법"
+    },
+    "disability": {
+      "keywords": ["장해보험금", "장해급여금", "장해자금", "장해분류표"],
+      "label_ko": "장해"
     }
   },
 
@@ -102,6 +122,14 @@
     "premium_waiver": {
       "keywords": ["납입면제", "보험료 면제"],
       "label_ko": "납입면제"
+    },
+    "examination": {
+      "keywords": ["검사비", "검사비용", "검사자금"],
+      "label_ko": "검사"
+    },
+    "disability": {
+      "keywords": ["장해보험금", "장해급여금", "장해자금", "장해분류표"],
+      "label_ko": "장해"
     }
   }
 }

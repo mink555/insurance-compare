@@ -150,7 +150,69 @@ streamlit run app.py
 
 ---
 
-## 운영 관리
+## 분류 파이프라인 설계 로직
+
+### 원칙
+
+> **사전은 항상 불완전하다. 불완전함을 빠르게 감지하고, 보완 비용을 최소화한다.**
+
+### 파이프라인 흐름
+
+```
+[Stage 1] parse       PDF → {benefit_name, trigger, amounts}
+              ↓
+[Stage 2] normalize   회사별 raw dict → CanonicalBenefit 공통 구조
+              ↓
+[Stage 3] classify    benefit_name 우선 → trigger 보조 → 카테고리 분류
+              ↓
+[Stage 3 검증]        other 비율 측정 → 5% 초과 시 WARNING + 미분류 목록 출력
+              ↓
+[Stage 4] export      CanonicalBenefit → SummaryRow (비교 테이블 행)
+```
+
+### 카테고리 분류 매칭 전략 (2단계)
+
+```
+1단계: benefit_name만으로 매칭
+       → 카테고리 식별 정보가 benefit_name에 집약되어 있기 때문
+       → 예: "암 주요검사비용지원금" → examination (검사)
+
+2단계: benefit_name 매칭 실패 시 (benefit_name + trigger) 전체로 재시도
+       → trigger는 판박이 문장이 많아 오탐 가능성이 있으므로 보조 수단으로만 사용
+```
+
+**왜 benefit_name만 먼저 보나?**  
+trigger는 대부분 "보험기간 중 피보험자가 암보장개시일 이후에 '암'으로 진단이 확정되고..." 같은 반복 문장임. 이를 먼저 보면 진단/치료/검사 등 서로 다른 급부가 같은 키워드("진단", "확정")에 걸려 오분류될 수 있음.
+
+### other 비율과 재발 방지
+
+분류에 실패한 급부는 `other`(기타)로 기록됨. **이 비율이 높아지는 것이 사전 보완이 필요하다는 신호임.**
+
+파이프라인은 Stage3 완료 후 자동으로 other 비율을 측정하고 5% 초과 시 로그에 WARNING을 남김.
+
+```
+[Stage3/classify] ⚠️ other 비율 10.8% > 5%
+미분류 급부명: ['암 주요검사비용지원금', '급여 PET검사비용', ...]
+```
+
+---
+
+## 운영 로직
+
+### 새 상품 추가 후 필수 절차
+
+```
+1. 상품 파싱 (파이프라인 실행)
+        ↓
+2. 분류 검증 스크립트 실행
+   python scripts/validate_categories.py
+        ↓
+3. other 비율 확인
+   ├─ 5% 이하 → 완료
+   └─ 5% 초과 → 미분류 급부명 목록 확인
+                → benefit_category_keywords.json 해당 섹션에 키워드 추가
+                → 검증 스크립트 재실행 → 5% 이하 확인
+```
 
 ### 문제 발생 시 원인 찾기
 
@@ -160,6 +222,29 @@ streamlit run app.py
 | 금액 같은데 "우위" 판정 | 금액 파싱 오류 | 해당 회사 파서 |
 | 새 상품 특약이 전부 "기타" 분류 | 카테고리 키워드 미등록 | `benefit_category_keywords.json` |
 | 다른 보장이 같은 항목으로 매칭 | 동의어 과도 등록 | `config/synonyms.json` |
+| 로그에 other 비율 경고 | 신규 급부 유형 사전 미등록 | `benefit_category_keywords.json` |
+
+### `benefit_category_keywords.json` 키워드 추가 방법
+
+새 급부가 `other`로 분류될 때 추가한다.
+
+```
+1. validate_categories.py 실행 → 미분류 급부명 확인
+2. 해당 급부가 어느 카테고리인지 판단
+   (판단 기준: 급부명 자체 + 표준약관 정의)
+3. 해당 보험 종류 섹션에 키워드 추가
+   - 기존 카테고리에 속하면: keywords 배열에 추가
+   - 새 카테고리면: 섹션 자체를 추가 (코드 수정 불필요)
+4. validate_categories.py 재실행 → 5% 이하 확인
+```
+
+**판단이 애매한 케이스 처리 원칙**
+
+| 케이스 | 처리 |
+|--------|------|
+| 보험 종류 자체가 다른 급부 (예: 난임) | 파서 필터링 대상 — 사전 추가 금지 |
+| trigger가 비어있어 매칭 불가 | 파서 품질 문제 — 파서 수정 |
+| 새 유형의 진단/치료 (예: 신의료기술) | 가장 가까운 카테고리에 추가 |
 
 ### `synonyms.json` 업데이트 시점
 
@@ -170,7 +255,7 @@ streamlit run app.py
   → synonyms.json 해당 항목의 표기 목록에 추가
 ```
 
-**KCD 코드 개정 시** (대개정 5~10년, 소개정 수시 — 건강보험심사평가원 고시)
+**KCD 코드 개정 시** (대개정 5~10년, 소개정 수시)
 ```
 kcd9_cancer_codes.json 업데이트
   → 질병 분류가 바뀐 항목만 synonyms.json 반영
@@ -219,6 +304,10 @@ src/insurance_parser/
     rag.py                      ChromaDB 도메인 RAG
   report/
     generator.py                리포트 생성 + Evidence 수집
+
+scripts/
+  validate_categories.py         분류 검증 (other 비율 측정, 미분류 목록 출력)
+  parse_linalife_summaries.py     라이나생명 상품 일괄 파싱
 
 config/
   synonyms.json                 급부명 동의어 사전

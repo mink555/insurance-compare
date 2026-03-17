@@ -40,6 +40,42 @@ from .models import DocType
 
 logger = logging.getLogger(__name__)
 
+# other 비율 경고 임계값 (이 값 초과 시 WARNING 로그 + 급부명 목록 출력)
+_OTHER_RATIO_THRESHOLD = 0.05
+
+
+def _warn_if_high_other_ratio(
+    canonical: list[CanonicalBenefit],
+    company_name: str,
+    product_name: str,
+) -> None:
+    """Stage3 분류 후 other 비율을 측정하고 임계값 초과 시 경고를 출력한다.
+
+    other 비율 > 5%이면 미분류 급부명 목록과 함께 WARNING을 기록한다.
+    이 경고가 반복된다면 benefit_category_keywords.json에 키워드 추가가 필요하다.
+    """
+    if not canonical:
+        return
+    other_items = [b for b in canonical if b.benefit_category == "other"]
+    ratio = len(other_items) / len(canonical)
+
+    logger.info(
+        "[Stage3/classify] %s/%s: 전체 %d건 중 other %d건 (%.1f%%)",
+        company_name, product_name, len(canonical), len(other_items), ratio * 100,
+    )
+
+    if ratio > _OTHER_RATIO_THRESHOLD:
+        names = list(dict.fromkeys(b.benefit_name for b in other_items if b.benefit_name))
+        logger.warning(
+            "[Stage3/classify] ⚠️ other 비율 %.1f%% > %.0f%% — "
+            "benefit_category_keywords.json 키워드 추가 필요. "
+            "미분류 급부명 (%d건): %s",
+            ratio * 100,
+            _OTHER_RATIO_THRESHOLD * 100,
+            len(names),
+            names,
+        )
+
 
 def _get_parser(company_name: str):
     """회사명으로 파서 클래스 조회. ProductBundleParser 레지스트리 활용."""
@@ -193,6 +229,9 @@ def run_pipeline(
     # ── Stage 3: classify ───────────────────────────────────────────────────
     canonical = classify_benefits(canonical)
     result.canonical_benefits = canonical
+
+    # ── Stage 3 검증: other 비율 측정 ───────────────────────────────────────
+    _warn_if_high_other_ratio(canonical, bundle.company_name, bundle.product_name)
 
     # ── Stage 4: export ─────────────────────────────────────────────────────
     rows = export_to_summary_rows(canonical)

@@ -1,7 +1,13 @@
 """Stage 3: 의미 분류기 (benefit_category 분류).
 
 키워드 사전(benefit_category_keywords.json)을 기반으로
-trigger + benefit_name 텍스트에서 보험 종류와 급부 카테고리를 자동 분류합니다.
+benefit_name → trigger 순서로 우선순위를 두어 카테고리를 분류합니다.
+
+매칭 전략 (2단계):
+  1단계: benefit_name만으로 매칭 시도
+         → benefit_name에 카테고리 식별 정보가 집약되어 있기 때문
+  2단계: benefit_name 매칭 실패 시 (benefit_name + trigger) 전체 텍스트로 재시도
+         → trigger는 판박이 문장이 많아 오탐 가능성이 있으므로 보조 수단으로만 사용
 
 신상품/타 보험 종류 추가 시: benefit_category_keywords.json만 수정하세요.
 코드 변경 불필요.
@@ -46,27 +52,9 @@ def detect_insurance_type(product_name: str, source_pdf: str = "") -> str:
     return "default"
 
 
-def classify_benefit_category(
-    benefit_name: str,
-    trigger: str,
-    insurance_type: str,
-) -> tuple[str, str]:
-    """급부명 + 지급사유 텍스트 → (benefit_category, benefit_category_ko).
-
-    키워드 사전에서 insurance_type 섹션을 먼저 검색하고,
-    없으면 default 섹션으로 fallback합니다.
-    """
-    kw_dict = _load_keywords()
-    search_text = benefit_name + " " + trigger
-
-    # insurance_type 전용 사전 → default 순으로 검색
-    sections_to_try = []
-    if insurance_type and insurance_type in kw_dict:
-        sections_to_try.append(kw_dict[insurance_type])
-    if "default" in kw_dict:
-        sections_to_try.append(kw_dict["default"])
-
-    for section in sections_to_try:
+def _match_in_sections(search_text: str, sections: list[dict]) -> tuple[str, str] | None:
+    """sections 순서대로 키워드 매칭 시도. 매칭되면 (cat_key, label_ko) 반환, 없으면 None."""
+    for section in sections:
         for cat_key, cat_data in section.items():
             if cat_key.startswith("_"):
                 continue
@@ -74,6 +62,38 @@ def classify_benefit_category(
             for kw in keywords:
                 if kw in search_text:
                     return cat_key, cat_data.get("label_ko", cat_key)
+    return None
+
+
+def classify_benefit_category(
+    benefit_name: str,
+    trigger: str,
+    insurance_type: str,
+) -> tuple[str, str]:
+    """급부명 + 지급사유 텍스트 → (benefit_category, benefit_category_ko).
+
+    매칭 전략 (2단계):
+      1단계: benefit_name만으로 매칭 (insurance_type 섹션 → default 순)
+      2단계: benefit_name 미매칭 시 (benefit_name + trigger) 전체 텍스트로 재시도
+    """
+    kw_dict = _load_keywords()
+
+    sections_to_try = []
+    if insurance_type and insurance_type in kw_dict:
+        sections_to_try.append(kw_dict[insurance_type])
+    if "default" in kw_dict:
+        sections_to_try.append(kw_dict["default"])
+
+    # 1단계: benefit_name만으로 매칭
+    result = _match_in_sections(benefit_name, sections_to_try)
+    if result:
+        return result
+
+    # 2단계: benefit_name + trigger 전체 텍스트로 재시도
+    if trigger:
+        result = _match_in_sections(benefit_name + " " + trigger, sections_to_try)
+        if result:
+            return result
 
     return "other", "기타"
 
@@ -93,3 +113,4 @@ def classify_benefits(benefits: list[CanonicalBenefit]) -> list[CanonicalBenefit
             b.benefit_category = cat
             b.benefit_category_ko = cat_ko
     return benefits
+
