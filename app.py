@@ -368,10 +368,8 @@ div[data-testid="stTabPanel"] div[data-testid="stVerticalBlock"] { gap: var(--sp
 /* ══════════════════════════════════════════════
    I. EVIDENCE TAG
    ══════════════════════════════════════════════ */
-.eid { display: inline; font-size: 10px; font-weight: 600; color: var(--teal-600); background: none; border: none; padding: 0 1px; margin-left: 1px; cursor: help; transition: all .15s; vertical-align: super; line-height: 1; position: relative; }
-.eid:hover { color: var(--teal-800); text-decoration: underline; }
-.eid[data-tooltip]:hover::after { content: attr(data-tooltip); position: absolute; left: 0; top: calc(100% + 6px); z-index: 9999; width: 340px; max-width: 90vw; padding: var(--sp-3) var(--sp-4); background: #111; color: #E0E7FF; font-size: var(--fs-xs); font-weight: 400; line-height: 1.55; border-radius: var(--r-sm); box-shadow: 0 8px 24px rgba(0,0,0,.35); white-space: normal; word-break: keep-all; pointer-events: none; }
-.eid[data-tooltip]:hover::before { content: ''; position: absolute; left: 10px; top: calc(100% + 1px); z-index: 9999; border: 5px solid transparent; border-bottom-color: #111; pointer-events: none; }
+.eid { display: inline; font-size: 10px; font-weight: 600; color: var(--teal-600); background: none; border: none; padding: 0 1px; margin-left: 1px; cursor: default; vertical-align: super; line-height: 1; }
+.eid:hover { color: var(--teal-800); }
 
 /* ══════════════════════════════════════════════
    J. CARD SYSTEM
