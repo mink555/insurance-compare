@@ -216,23 +216,31 @@ def _get_slot_val(row: dict | None, slot_key: str) -> str:
 def _build_amount_display(row: dict | None) -> str:
     """표시용 금액 문자열 생성.
 
-    amount_detail이 있으면 금액 범위만 요약 표시 (예: 100만원 ~ 200만원).
+    amount_detail이 있으면 조건별 금액을 '조건 금액' 형태로 줄바꿈 나열.
     단일 금액이면 amount + amount_condition 조합.
     """
     if not row:
         return ""
     detail = _parse_amount_detail(row)
     if detail:
-        amounts = [_parse_amount_won(d.get("amount", "")) for d in detail]
-        amounts = [a for a in amounts if a is not None]
-        if amounts:
-            min_a, max_a = min(amounts), max(amounts)
-            if min_a == max_a:
-                return f"{min_a // 10000:,}만원"
-            return f"{min_a // 10000:,}만원 ~ {max_a // 10000:,}만원"
-        # 숫자 파싱 불가 시 첫 항목 금액 그대로
-        first_amt = detail[0].get("amount", "").strip()
-        return first_amt if first_amt else row.get("amount", "")
+        parts = []
+        seen = set()
+        for d in detail:
+            amt = d.get("amount", "").strip()
+            cond = d.get("condition", "").strip()
+            trigger = d.get("trigger", "").strip()
+            if not amt:
+                continue
+            # trigger가 여러 개인 경우 trigger를 prefix로
+            prefix = f"[{trigger}] " if trigger else ""
+            line = f"{prefix}{cond} {amt}".strip() if cond else f"{prefix}{amt}"
+            if line not in seen:
+                seen.add(line)
+                parts.append(line)
+        if parts:
+            return "\n".join(parts)
+        # 파싱 실패 시 첫 항목 그대로
+        return detail[0].get("amount", "") or row.get("amount", "")
     amt = row.get("amount", "")
     cond = row.get("amount_condition", "")
     if cond and amt and cond not in amt:

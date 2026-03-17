@@ -891,11 +891,13 @@ def _render_compare_step(
         diff_cls = ' row-diff' if row["status"] in ("당사우위", "타사우위", "금액상이", "조건상이") else ''
         rat = row.get("rationale", "") if row.get("status") != "조건상이" else ""
         rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
+        our_amt = (row["our_amount"] or "—").replace("\n", "<br>")
+        comp_amt = (row["comp_amount"] or "—").replace("\n", "<br>")
         rows3.append(
             f'<tr><td class="row-label cell-clamp">{row["our_name"]}</td>'
             f'<td class="row-label cell-clamp">{row["comp_name"]}</td>'
-            f'<td class="text-our col-our-cell{diff_cls}">{row["our_amount"] or "—"}</td>'
-            f'<td class="text-comp col-comp-cell{diff_cls}">{row["comp_amount"] or "—"}</td>'
+            f'<td class="text-our col-our-cell{diff_cls}" style="white-space:normal;line-height:1.6;font-size:12px">{our_amt}</td>'
+            f'<td class="text-comp col-comp-cell{diff_cls}" style="white-space:normal;line-height:1.6;font-size:12px">{comp_amt}</td>'
             f'<td class="col-status">{_status_html(row["status"])}{rat_html}</td></tr>'
         )
     st.markdown(
@@ -1154,13 +1156,15 @@ def _render_rpt_comparison(report, ev_map: dict) -> None:
             rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
             our_eid = _find_eid(ev_map, "당사", "amount", row["our_name"])
             comp_eid = _find_eid(ev_map, "타사", "amount", row["comp_name"])
-            our_amt_html = _cell_v(row["our_amount"] or "", our_eid)
-            comp_amt_html = _cell_v(row["comp_amount"] or "", comp_eid)
+            our_amt = (row["our_amount"] or "").replace("\n", "<br>")
+            comp_amt = (row["comp_amount"] or "").replace("\n", "<br>")
+            our_amt_html = _cell_v(our_amt, our_eid)
+            comp_amt_html = _cell_v(comp_amt, comp_eid)
             a_rows.append(
                 f'<tr><td class="row-label cell-clamp">{row["our_name"]}</td>'
                 f'<td class="row-label cell-clamp">{row["comp_name"]}</td>'
-                f'<td class="text-our col-our-cell{diff_cls}">{our_amt_html}</td>'
-                f'<td class="text-comp col-comp-cell{diff_cls}">{comp_amt_html}</td>'
+                f'<td class="text-our col-our-cell{diff_cls}" style="white-space:normal;line-height:1.6;font-size:12px">{our_amt_html}</td>'
+                f'<td class="text-comp col-comp-cell{diff_cls}" style="white-space:normal;line-height:1.6;font-size:12px">{comp_amt_html}</td>'
                 f'<td class="col-status">{_status_html(row["status"])}{rat_html}</td></tr>'
             )
         cg5 = '<colgroup><col style="width:20%"><col style="width:20%"><col style="width:17%"><col style="width:17%"><col style="width:26%"></colgroup>'
@@ -1353,17 +1357,29 @@ def _render_rpt_evidence(report) -> None:
         with st.expander(f"{title} ({len(evs)}건)", expanded=False):
             cards_html = []
             for ev in evs:
-                contract_html = f'<span class="ev-card-contract">{ev.contract}</span>' if ev.contract else ''
+                side_style = (
+                    "background:#f0fdfa;color:#0f766e;border:1px solid #99f6e4"
+                    if side_cls == "ev-card-side-our"
+                    else "background:#fef2f2;color:#b91c1c;border:1px solid #fecaca"
+                )
+                contract_html = (
+                    f'<span style="font-size:11px;color:#9ca3af;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">{ev.contract}</span>'
+                    if ev.contract else ''
+                )
+                safe_text = ev.text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 cards_html.append(
-                    f'<div class="ev-card">'
-                    f'<div class="ev-card-hdr">'
-                    f'<span class="ev-card-id">[{ev.id}]</span>'
-                    f'<span class="ev-card-side {side_cls}">{ev.side}</span>'
-                    f'<span class="ev-card-benefit">{ev.benefit}</span>'
+                    f'<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px">'
+                    # 헤더
+                    f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">'
+                    f'<span style="font-size:11px;font-weight:700;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;padding:2px 8px;border-radius:20px">[{ev.id}]</span>'
+                    f'<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;{side_style}">{ev.side}</span>'
+                    f'<span style="font-size:13px;font-weight:600;color:#1f2937">{ev.benefit}</span>'
                     f'{contract_html}'
                     f'</div>'
-                    f'<span class="ev-card-field">{ev.field}</span>'
-                    f'<div class="ev-card-text">{ev.text}</div>'
+                    # 필드 태그
+                    f'<span style="display:inline-block;font-size:11px;color:#6b7280;background:#f3f4f6;padding:1px 8px;border-radius:20px;margin-bottom:8px">{ev.field}</span>'
+                    # 원문
+                    f'<div style="font-size:12px;color:#374151;line-height:1.75;white-space:pre-wrap;word-break:keep-all;background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:10px 12px">{safe_text}</div>'
                     f'</div>'
                 )
             st.markdown("".join(cards_html), unsafe_allow_html=True)
