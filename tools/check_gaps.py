@@ -26,7 +26,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "src"))
 
-from insurance_parser.comparison.normalize import canonical_key, normalize_text, invalidate_synonyms_cache
+from insurance_parser.comparison.normalize import canonical_key, normalize_text, invalidate_synonyms_cache, action_from_row
 from insurance_parser.summary_pipeline.store import ArtifactStore
 
 
@@ -50,25 +50,24 @@ def analyze(insurer_filter: str | None = None) -> dict:
     raw_gaps: list[dict] = []
     for r in rows:
         name = r.get("benefit_name", "")
-        cat_ko = r.get("benefit_category_ko", "")
-        ck = canonical_key(name, cat_ko)
+        ck = canonical_key(name)
         if _is_raw_key(name, ck):
             raw_gaps.append({
-                "insurer":  r.get("insurer", ""),
-                "product":  r.get("product_name", ""),
+                "insurer":      r.get("insurer", ""),
+                "product":      r.get("product_name", ""),
                 "benefit_name": name,
                 "canonical_key": ck,
-                "category": cat_ko,
             })
 
-    # ── 2. benefit_category_ko = '기타' ──
+    # ── 2. action 슬롯 미추출 (분류 불가) ──
     cat_gaps: list[dict] = []
     for r in rows:
-        if r.get("benefit_category_ko", "") in ("기타", "", None):
+        act = action_from_row(r)
+        if not act:
             cat_gaps.append({
-                "insurer": r.get("insurer", ""),
+                "insurer":      r.get("insurer", ""),
                 "benefit_name": r.get("benefit_name", ""),
-                "canonical_key": canonical_key(r.get("benefit_name", ""), ""),
+                "canonical_key": canonical_key(r.get("benefit_name", "")),
             })
 
     # ── 3. 보험사별 단독 급부 수 (타사 매칭 없는 것) ──
@@ -76,7 +75,7 @@ def analyze(insurer_filter: str | None = None) -> dict:
     key_by_insurer: dict[str, set] = defaultdict(set)
     for r in rows:
         insurer = r.get("insurer", "")
-        ck = canonical_key(r.get("benefit_name", ""), r.get("benefit_category_ko", ""))
+        ck = canonical_key(r.get("benefit_name", ""))
         key_by_insurer[insurer].add(ck)
 
     insurers = list(key_by_insurer)
@@ -119,13 +118,13 @@ def _print_report(result: dict) -> None:
         print("  → config/synonyms_<보험사명>.json 에 추가 필요")
         for item in sg["items"]:
             print(f"  [{item['insurer']}] {item['benefit_name']!r}")
-            print(f"         canonical_key={item['canonical_key']!r}  cat={item['category']!r}")
+            print(f"         canonical_key={item['canonical_key']!r}")
     else:
         print("  ✓ 없음")
 
-    # category 갭
+    # action 갭
     cg = result["category_gap"]
-    print(f"\n[2] benefit_category_ko 미분류 ('기타'): {cg['count']}건")
+    print(f"\n[2] action 슬롯 미추출 (synonyms 미매칭): {cg['count']}건")
     if cg["items"]:
         print("  → insurance_info/benefit_category_keywords.json 키워드 추가 필요")
         for item in cg["items"][:10]:

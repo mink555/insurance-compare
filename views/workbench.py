@@ -32,6 +32,7 @@ from insurance_parser.summary_pipeline.normalizer import to_comparison_rows
 from insurance_parser.summary_pipeline.detector import _SUMMARY_NAME_RE, _TERMS_NAME_RE
 from insurance_parser.report.generator import SummaryReportBuilder
 from insurance_parser.comparison.engine import build_comparison, ComparisonResult, rebuild_amount_table
+from insurance_parser.comparison.normalize import action_from_row
 from insurance_parser.comparison.enrich import enrich_rows, resolve_mixed_pairs
 
 _store = ArtifactStore()
@@ -544,7 +545,7 @@ def _render_benefit_expander(row: dict, detail_df: Optional[pd.DataFrame], badge
         ("대표 금액",  row.get("amount", "—"),              "var(--our-700)"),
         ("지급조건",   row.get("amount_condition", "—"),    "var(--gray-700)"),
         ("특약명",     row.get("contract_name", "—"),       "var(--gray-700)"),
-        ("카테고리",   row.get("benefit_category_ko", "—"), "var(--gray-700)"),
+        ("카테고리",   action_from_row(row) or "—",              "var(--gray-700)"),
     ]
     for col, (label, value, color) in zip(meta_cols, fields):
         with col:

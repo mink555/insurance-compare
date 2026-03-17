@@ -162,25 +162,18 @@ def _strip_type_suffix(text: str) -> str:
     return text
 
 
-_CATEGORY_KO_TO_ACTION = {
-    "진단": "진단", "수술": "수술", "치료": "치료",
-    "입원": "입원", "통원": "통원", "사망": "사망", "장해": "장해",
-}
-
-
-def canonical_key(benefit_name: str, category_ko: str = "") -> str:
+def canonical_key(benefit_name: str) -> str:
     """급부명 → canonical key 문자열.
 
     1. 정규화 (공백/괄호/특수문자 제거)
     2. type 접미사 제거 (자금/보험금/급여금 — 회사별 명명 차이)
     3. condition | disease | action 슬롯 추출 (longest-match)
        - disease: action variant를 먼저 마스킹 후 추출 (오탐 방지)
-       - action 미추출 시 benefit_category_ko fallback
     4. 빈 슬롯 제외하고 '|'로 결합
 
     >>> canonical_key("비급여(전액본인부담 포함) 항암약물 ·방사선치료자금")
     '비급여|항암방사선'
-    >>> canonical_key("갑상선암", "진단")
+    >>> canonical_key("갑상선암 진단자금")
     '갑상선암|진단'
     """
     norm = normalize_text(benefit_name)
@@ -188,7 +181,6 @@ def canonical_key(benefit_name: str, category_ko: str = "") -> str:
         return ""
 
     stripped = _strip_type_suffix(norm)
-    # disease 추출 전용: action variant 마스킹으로 '항암약물' 안의 '암' 오탐 방지
     stripped_for_disease = _mask_action_variants(stripped)
 
     slots: list[str] = []
@@ -197,15 +189,29 @@ def canonical_key(benefit_name: str, category_ko: str = "") -> str:
             val = _extract_slot(stripped_for_disease, cat)
         elif cat == "action":
             val = _extract_slot(stripped, cat) or _extract_slot(norm, cat)
-            if not val and category_ko:
-                val = _CATEGORY_KO_TO_ACTION.get(category_ko, "")
         else:
-            # condition: stripped 사용 (오탐 방지)
             val = _extract_slot(stripped, cat)
         if val:
             slots.append(val)
 
     return "|".join(slots) if slots else norm
+
+
+def action_from_row(row: dict) -> str:
+    """row의 benefit_name에서 canonical_key action 슬롯을 추출.
+
+    집계/분류 로직에서 benefit_category_ko 대신 사용.
+    슬롯이 없으면 빈 문자열 반환.
+    """
+    ck = canonical_key(row.get("benefit_name", ""))
+    parts = ck.split("|")
+    # action은 마지막 슬롯. disease/condition만 있는 경우 제외.
+    reverse = _build_reverse_map()
+    action_labels = set(reverse.get("action", {}).values())
+    for part in reversed(parts):
+        if part in action_labels:
+            return part
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +242,7 @@ def _build_key_map(rows: list[dict]) -> dict[str, list[dict]]:
     """rows → {canonical_key: [row, ...]}."""
     key_map: dict[str, list[dict]] = {}
     for row in rows:
-        ck = canonical_key(row.get("benefit_name", ""), row.get("benefit_category_ko", ""))
+        ck = canonical_key(row.get("benefit_name", ""))
         key_map.setdefault(ck, []).append(row)
     return key_map
 

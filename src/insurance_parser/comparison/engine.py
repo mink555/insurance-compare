@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .normalize import MatchedPair, MatchResult, canonical_key, match_benefits
+from .normalize import MatchedPair, MatchResult, canonical_key, match_benefits, action_from_row
 
 logger = logging.getLogger(__name__)
 
@@ -798,7 +798,7 @@ def build_insight_summary(
     cat_score: dict[str, dict] = defaultdict(lambda: {"우": 0, "열": 0, "동": 0})
     for cp in matched:
         row = cp.our_row or cp.comp_row or {}
-        cat = row.get("benefit_category_ko") or "기타"
+        cat = action_from_row(row) or "기타"
         if cp.overall_advantage == "당사우위":
             cat_score[cat]["우"] += 1
         elif cp.overall_advantage == "타사우위":
@@ -811,7 +811,7 @@ def build_insight_summary(
         counts: dict[str, int] = defaultdict(int)
         for cp in pairs:
             row = (cp.our_row if side == "our" else cp.comp_row) or {}
-            cat = row.get("benefit_category_ko") or "기타"
+            cat = action_from_row(row) or "기타"
             counts[cat] += 1
         return dict(counts)
 

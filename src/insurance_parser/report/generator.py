@@ -23,6 +23,8 @@ from typing import Optional
 
 import pandas as pd
 
+from insurance_parser.comparison.normalize import action_from_row, canonical_key
+
 log = logging.getLogger(__name__)
 
 
@@ -257,9 +259,9 @@ class ComparisonReport:
         lines.append("|------|------|------|")
 
         diag_base = {n: r for n, r in base_map.items()
-                     if r.get("benefit_category_ko", "") == "진단"}
+                     if action_from_row(r) == "진단"}
         diag_comp = {n: r for n, r in comp_map.items()
-                     if r.get("benefit_category_ko", "") == "진단"}
+                     if action_from_row(r) == "진단"}
 
         for item_label, kcd_desc in _DISEASE_SCOPE_DEFS:
             b_matches = [n for n in diag_base if item_label.replace("암 ", "") in n or item_label in n]
@@ -344,8 +346,13 @@ class ComparisonReport:
 
         # 치료/수술 급부별 상세
         treat_names = [n for n in all_names
-                       if (base_map.get(n) or comp_map.get(n) or {}).get("benefit_category_ko", "")
-                       in ("치료", "수술")]
+                       if action_from_row(base_map.get(n) or comp_map.get(n) or {})
+                       in ("치료", "수술", "항암약물", "표적항암약물", "항암방사선",
+                           "특정면역항암약물", "카티항암약물", "특정항암호르몬약물",
+                           "항암세기조절방사선", "항암양성자방사선", "항암중입자방사선",
+                           "항암복합", "로봇수술", "관혈수술", "내시경수술",
+                           "복강경흉강경수술", "재건수술", "절제수술", "적출수술",
+                           "피부재건수술", "림프부종수술")]
         if treat_names:
             lines.append("")
             lines.append("**치료·수술 급부별 상세**\n")
@@ -389,9 +396,12 @@ class ComparisonReport:
 
         # ── (4) 부가보장 ──
         lines.append("### (4) 부가보장\n")
-        extra_cats = {"입원", "생활비", "납입면제", "사망", "기타"}
+        extra_actions = {"입원", "통원", "요양병원입원", "생활자금", "사망", "장해", "재진단",
+                         "중환자실", "재활치료", "다학제진료", "영양치료", "통증완화", "항구토제",
+                         "검사", "주요검사", "기타검사", "PET검사", "PSMAPET검사",
+                         "NGS유전자패널검사", "MRI촬영검사", "바늘생검"}
         extra_names = [n for n in all_names
-                       if (base_map.get(n) or comp_map.get(n) or {}).get("benefit_category_ko", "") in extra_cats]
+                       if action_from_row(base_map.get(n) or comp_map.get(n) or {}) in extra_actions]
 
         if extra_names:
             lines.append(f"| 항목 | {our_l} | {comp_l} |")
@@ -443,9 +453,10 @@ class ComparisonReport:
             for r in only_our[:8]:
                 cancer = _classify_cancer(r.get("benefit_name", ""))
                 tag = f" [{cancer}]" if cancer else ""
+                act = action_from_row(r)
                 lines.append(
                     f"- **{r.get('benefit_name', '')}{tag}** "
-                    f"({r.get('benefit_category_ko', '')}) — {r.get('amount', '')}"
+                    f"({act}) — {r.get('amount', '')}"
                 )
             lines.append("")
 
@@ -454,9 +465,10 @@ class ComparisonReport:
             for r in only_comp[:8]:
                 cancer = _classify_cancer(r.get("benefit_name", ""))
                 tag = f" [{cancer}]" if cancer else ""
+                act = action_from_row(r)
                 lines.append(
                     f"- **{r.get('benefit_name', '')}{tag}** "
-                    f"({r.get('benefit_category_ko', '')}) — {r.get('amount', '')}"
+                    f"({act}) — {r.get('amount', '')}"
                 )
             lines.append("")
 
