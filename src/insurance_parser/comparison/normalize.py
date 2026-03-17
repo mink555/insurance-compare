@@ -129,17 +129,31 @@ def _strip_type_suffix(text: str) -> str:
     return text
 
 
-def canonical_key(benefit_name: str) -> str:
+_CATEGORY_KO_TO_ACTION = {
+    "진단": "진단",
+    "수술": "수술",
+    "치료": "치료",
+    "입원": "입원",
+    "통원": "통원",
+    "사망": "사망",
+    "장해": "장해",
+}
+
+
+def canonical_key(benefit_name: str, category_ko: str = "") -> str:
     """급부명 → canonical key 문자열.
 
     1. 정규화 (공백/괄호/특수문자 제거)
     2. type 접미사 제거 (자금/보험금/급여금 — 회사별 명명 차이일 뿐)
     3. condition | disease | action 슬롯 추출
        - stripped 텍스트 우선, 슬롯 없으면 norm(접미사 제거 전)으로 재시도
+       - action이 비어있으면 category_ko fallback 사용 (예: '갑상선암' + cat='진단' → '갑상선암|진단')
     4. 빈 슬롯 제외하고 '|'로 결합
 
     >>> canonical_key("비급여(전액본인부담 포함) 항암약물 ·방사선치료자금")
     '비급여|항암약물'
+    >>> canonical_key("갑상선암", "진단")
+    '갑상선암|진단'
     """
     norm = normalize_text(benefit_name)
     if not norm:
@@ -154,6 +168,9 @@ def canonical_key(benefit_name: str) -> str:
         # condition/disease는 stripped만 사용 (norm fallback 시 '급여금' → '급여' 오탐 방지)
         if cat == "action":
             val = _extract_slot(stripped, cat) or _extract_slot(norm, cat)
+            # action 미추출 시 benefit_category_ko로 fallback
+            if not val and category_ko:
+                val = _CATEGORY_KO_TO_ACTION.get(category_ko, "")
         else:
             val = _extract_slot(stripped, cat)
         if val:
@@ -194,7 +211,8 @@ def _build_key_map(rows: list[dict]) -> dict[str, list[dict]]:
     key_map: dict[str, list[dict]] = {}
     for row in rows:
         bn = row.get("benefit_name", "")
-        ck = canonical_key(bn)
+        cat_ko = row.get("benefit_category_ko", "")
+        ck = canonical_key(bn, cat_ko)
         key_map.setdefault(ck, []).append(row)
     return key_map
 
