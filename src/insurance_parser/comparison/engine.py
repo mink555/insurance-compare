@@ -213,10 +213,20 @@ def _get_slot_val(row: dict | None, slot_key: str) -> str:
     return ""
 
 
+def _shorten_condition(cond: str) -> str:
+    """조건 문자열에서 기간 키워드만 추출. 추출 불가 시 앞 15자 truncate."""
+    if not cond:
+        return ""
+    m = _RE_PERIOD_SHORT.search(cond)
+    if m:
+        return m.group(1).replace(" ", "")
+    return cond[:15].rstrip() + ("…" if len(cond) > 15 else "")
+
+
 def _build_amount_display(row: dict | None) -> str:
     """표시용 금액 문자열 생성.
 
-    amount_detail이 있으면 조건별 금액을 '조건 금액' 형태로 줄바꿈 나열.
+    amount_detail이 있으면 '조건 금액' 형태로 줄바꿈 나열 (조건은 기간만 추출해 간결하게).
     단일 금액이면 amount + amount_condition 조합.
     """
     if not row:
@@ -225,26 +235,26 @@ def _build_amount_display(row: dict | None) -> str:
     if detail:
         parts = []
         seen = set()
+        # trigger 종류 수
+        triggers = {d.get("trigger", "").strip() for d in detail if d.get("trigger", "").strip()}
         for d in detail:
             amt = d.get("amount", "").strip()
-            cond = d.get("condition", "").strip()
+            cond = _shorten_condition(d.get("condition", ""))
             trigger = d.get("trigger", "").strip()
             if not amt:
                 continue
-            # trigger가 여러 개인 경우 trigger를 prefix로
-            prefix = f"[{trigger}] " if trigger else ""
+            prefix = f"[{trigger}] " if trigger and len(triggers) > 1 else ""
             line = f"{prefix}{cond} {amt}".strip() if cond else f"{prefix}{amt}"
             if line not in seen:
                 seen.add(line)
                 parts.append(line)
         if parts:
             return "\n".join(parts)
-        # 파싱 실패 시 첫 항목 그대로
         return detail[0].get("amount", "") or row.get("amount", "")
     amt = row.get("amount", "")
     cond = row.get("amount_condition", "")
     if cond and amt and cond not in amt:
-        return f"{cond} {amt}"
+        return f"{_shorten_condition(cond)} {amt}".strip()
     return amt
 
 
@@ -260,6 +270,8 @@ _RE_PERIOD_LIMIT = re.compile(
 )
 # 지급 주기 패턴 (판정에서 조건으로 취급 안 함)
 _RE_PERIODIC = re.compile(r"매년|매월|매회|연간|연\s*\d+회|매\s*\d+년")
+# 표시용 조건 단축 패턴 (기간 키워드만 추출)
+_RE_PERIOD_SHORT = re.compile(r"(\d+년\s*(?:미만|이상|이내|이후|초과))")
 
 
 @dataclass
