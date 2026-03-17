@@ -226,35 +226,45 @@ def _shorten_condition(cond: str) -> str:
 def _build_amount_display(row: dict | None) -> str:
     """표시용 금액 문자열 생성.
 
-    amount_detail이 있으면 '조건 금액' 형태로 줄바꿈 나열 (조건은 기간만 추출해 간결하게).
+    amount_detail이 있으면 기간 조건 기준으로 그룹핑해서 표시.
+    - 같은 기간 조건의 금액이 모두 같으면: '1년미만 100만원'
+    - 기간 조건은 같은데 trigger별로 금액 다르면: '1년미만 100만원~200만원'
     단일 금액이면 amount + amount_condition 조합.
     """
     if not row:
         return ""
     detail = _parse_amount_detail(row)
     if detail:
-        parts = []
-        seen = set()
-        # trigger 종류 수
-        triggers = {d.get("trigger", "").strip() for d in detail if d.get("trigger", "").strip()}
+        from collections import defaultdict
+        groups: dict[str, list[int]] = defaultdict(list)
+        order: list[str] = []
         for d in detail:
-            amt = d.get("amount", "").strip()
-            cond = _shorten_condition(d.get("condition", ""))
-            trigger = d.get("trigger", "").strip()
-            if not amt:
-                continue
-            prefix = f"[{trigger}] " if trigger and len(triggers) > 1 else ""
-            line = f"{prefix}{cond} {amt}".strip() if cond else f"{prefix}{amt}"
-            if line not in seen:
-                seen.add(line)
-                parts.append(line)
-        if parts:
+            amt_str = d.get("amount", "").strip()
+            cond_raw = d.get("condition", "")
+            cond = _shorten_condition(cond_raw) if cond_raw else ""
+            key = cond or "조건없음"
+            parsed = _parse_amount_won(amt_str)
+            if parsed is not None:
+                if key not in groups:
+                    order.append(key)
+                groups[key].append(parsed)
+        if groups:
+            parts = []
+            for key in order:
+                vals = sorted(set(groups[key]))
+                amt_str = (
+                    f"{vals[0] // 10000:,}만원"
+                    if len(vals) == 1
+                    else f"{vals[0] // 10000:,}만원~{vals[-1] // 10000:,}만원"
+                )
+                label = "" if key == "조건없음" else f"{key} "
+                parts.append(f"{label}{amt_str}")
             return "\n".join(parts)
         return detail[0].get("amount", "") or row.get("amount", "")
     amt = row.get("amount", "")
     cond = row.get("amount_condition", "")
     if cond and amt and cond not in amt:
-        return f"{_shorten_condition(cond)} {amt}".strip()
+        return f"{_shorten_condition(cond) or cond} {amt}".strip()
     return amt
 
 
