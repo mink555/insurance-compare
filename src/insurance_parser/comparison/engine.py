@@ -293,7 +293,7 @@ def _shorten_condition(cond: str) -> str:
 def _build_amount_display(row: dict | None) -> str:
     """표시용 금액 문자열 생성.
 
-    amount_detail이 있으면 기간 조건 기준으로 그룹핑해서 표시.
+    amount_detail이ㄱ 있으면 기간 조건 기준으로 그룹핑해서 표시.
     - 같은 기간 조건의 금액이 모두 같으면: '1년미만 100만원'
     - 기간 조건은 같은데 trigger별로 금액 다르면: '1년미만 100만원~200만원'
     단일 금액이면 amount + amount_condition 조합.
@@ -646,30 +646,47 @@ def rebuild_amount_table(cr: ComparisonResult) -> None:
 
 
 def _build_coverage_summary(match_result: MatchResult) -> dict:
-    """canonical key에서 disease 슬롯을 추출하여 질병 분류별 집계."""
+    """canonical key에서 disease 슬롯을 추출하여 질병 분류별 집계.
+
+    복합 disease 슬롯(예: '기타피부암갑상선암복합')은 포함된 개별 질병에도 함께 집계.
+    """
     disease_counts: dict[str, dict[str, int]] = {}
 
-    for pair in match_result.pairs:
-        parts = pair.canonical_key.split("|")
-        disease = ""
-        for p in parts:
-            if p in _DISEASE_LABELS:
-                disease = p
-                break
-        if not disease:
-            disease = "기타"
+    # 복합 슬롯 → 포함 disease 목록 매핑
+    _COMPOSITE_DISEASE_MAP: dict[str, list[str]] = {
+        "기타피부암갑상선암복합": ["기타피부암", "갑상선암"],
+        "유방전립선암": ["유방암", "전립선암"],
+        "갑상선암전립선암": ["갑상선암", "전립선암"],
+    }
 
+    def _get_diseases(canonical_key: str) -> list[str]:
+        parts = canonical_key.split("|")
+        for p in parts:
+            if p in _COMPOSITE_DISEASE_MAP:
+                return _COMPOSITE_DISEASE_MAP[p]
+            if p in _DISEASE_LABELS:
+                return [p]
+        return ["기타"]
+
+    def _inc(disease: str, side: str, is_matched: bool) -> None:
         if disease not in disease_counts:
             disease_counts[disease] = {"our": 0, "comp": 0, "matched": 0}
-
-        if pair.match_type == "matched":
+        disease_counts[disease][side] += 1
+        if is_matched:
             disease_counts[disease]["matched"] += 1
-            disease_counts[disease]["our"] += 1
-            disease_counts[disease]["comp"] += 1
+
+    for pair in match_result.pairs:
+        diseases = _get_diseases(pair.canonical_key)
+        if pair.match_type == "matched":
+            for d in diseases:
+                _inc(d, "our", True)
+                _inc(d, "comp", True)
         elif pair.match_type == "our_only":
-            disease_counts[disease]["our"] += 1
+            for d in diseases:
+                _inc(d, "our", False)
         else:
-            disease_counts[disease]["comp"] += 1
+            for d in diseases:
+                _inc(d, "comp", False)
 
     return disease_counts
 
