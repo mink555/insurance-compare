@@ -300,10 +300,11 @@ def _parse_amount_detail(row: dict | None) -> list[dict]:
 def _extract_amount_info(row: dict | None) -> AmountInfo:
     """row에서 AmountInfo를 추출한다.
 
-    판정 원칙:
-    - amount_detail이 복수 항목이면 조건부로 취급 → 조건별 금액 전체 보존
-    - amount_condition에 기간 제한 패턴이 있어도 동일하게 조건부 처리
-    - 조건부 금액은 최대값 대신 전체 detail을 그대로 전달
+    대표값(value) 원칙:
+    - 단일 금액이면 그 금액
+    - 복수 조건(amount_detail)이면 그 중 최대 금액을 대표값으로 사용
+      (비교 시 "상대방이 가장 유리한 조건에서 받을 수 있는 최대금액" 기준)
+    - is_conditional: 복수 조건이 있음을 표시 (rationale에서 주석으로 활용)
     """
     if not row:
         return AmountInfo(value=None, is_conditional=False, condition_note="", detail=[])
@@ -312,26 +313,25 @@ def _extract_amount_info(row: dict | None) -> AmountInfo:
     main_cond = row.get("amount_condition", "").strip()
     detail = _parse_amount_detail(row)
 
-    # 조건부 여부: detail 복수 항목이거나 amount_condition에 기간 제한 패턴
     is_conditional = False
     condition_note = ""
 
     if len(detail) > 1:
         is_conditional = True
-        # 조건 요약: detail의 condition 값들을 나열
-        conds = [d.get("condition", "").strip() for d in detail if d.get("condition", "").strip()]
-        condition_note = " / ".join(conds[:3])  # 최대 3개만 표시
+        # 표시용 조건 요약: 기간만 추출해서 나열
+        conds = [_shorten_condition(d.get("condition", "")) for d in detail if d.get("condition", "").strip()]
+        conds = [c for c in conds if c]
+        condition_note = " / ".join(dict.fromkeys(conds))  # 중복 제거 + 순서 유지
     elif main_cond:
-        if _RE_PERIOD_LIMIT.search(main_cond):
+        if _RE_PERIOD_LIMIT.search(main_cond) or not _RE_PERIODIC.search(main_cond):
             is_conditional = True
-            condition_note = main_cond[:30].rstrip()
-        elif not _RE_PERIODIC.search(main_cond):
-            is_conditional = True
-            condition_note = main_cond[:30].rstrip()
+            condition_note = _shorten_condition(main_cond) or main_cond[:20].rstrip()
 
-    # 대표 비교 금액: 조건부면 None (금액 단순 비교 불가), 단일이면 파싱
-    if is_conditional and len(detail) > 1:
-        value = None  # 조건별로 다르므로 단일 비교값 없음
+    # 대표 비교 금액: 복수 detail이면 최대값, 아니면 main amount
+    if detail:
+        parsed = [_parse_amount_won(d.get("amount", "")) for d in detail]
+        parsed = [v for v in parsed if v is not None]
+        value = max(parsed) if parsed else _parse_amount_won(main_amt_str)
     else:
         value = _parse_amount_won(main_amt_str)
 
@@ -346,22 +346,13 @@ def _extract_amount_info(row: dict | None) -> AmountInfo:
 def _compare_amounts(our: AmountInfo, comp: AmountInfo) -> tuple[str, str]:
     """두 AmountInfo를 비교하여 (advantage, rationale)을 반환.
 
-    판정 계층:
-    1. 어느 한쪽이라도 조건부(복수 조건) → 조건상이
-       - 조건별 금액이 다르면 단순 비교 불가이므로 전체 내용을 UI에서 직접 확인
-    2. 둘 다 단일 금액 → 숫자 크기 비교
-       - 한쪽만 조건부(단일 기간조건) → 조건 없는 쪽 우위
+    판정 원칙:
+    - 금액은 항상 비교 가능한 대표값(최대값 기준)으로 비교
+    - 금액이 다르면 높은 쪽 우위 (조건 여부와 무관)
+    - 금액이 같고 한쪽만 조건부이면 조건 없는 쪽 우위
+    - 금액이 같고 둘 다 조건부이면 조건상이
+    - 금액 없으면 비교불가
     """
-    # 조건부(복수 detail) 항목이 한쪽이라도 있으면 조건상이
-    if our.is_conditional or comp.is_conditional:
-        our_tag = f"당사: {our.condition_note}" if our.condition_note else "당사: 조건부"
-        comp_tag = f"타사: {comp.condition_note}" if comp.condition_note else "타사: 조건부"
-        if our.is_conditional and comp.is_conditional:
-            return "조건상이", f"{our_tag} / {comp_tag}"
-        if our.is_conditional:
-            return "조건상이", f"{our_tag}"
-        return "조건상이", f"{comp_tag}"
-
     our_v = our.value
     comp_v = comp.value
 
@@ -372,10 +363,29 @@ def _compare_amounts(our: AmountInfo, comp: AmountInfo) -> tuple[str, str]:
     if comp_v is None:
         return "당사우위", "금액↑"
 
+    our_cond = f"({our.condition_note})" if our.is_conditional and our.condition_note else ""
+    comp_cond = f"({comp.condition_note})" if comp.is_conditional and comp.condition_note else ""
+
     if our_v > comp_v:
-        return "당사우위", "금액↑"
+        note = f"금액↑"
+        if comp.is_conditional:
+            note += f" · 타사최대{comp_v // 10000:,}만원{comp_cond}"
+        return "당사우위", note
     if our_v < comp_v:
-        return "타사우위", "금액↓"
+        note = f"금액↓"
+        if our.is_conditional:
+            note += f" · 당사최대{our_v // 10000:,}만원{our_cond}"
+        return "타사우위", note
+
+    # 금액 동일
+    if our.is_conditional and comp.is_conditional:
+        if our.condition_note != comp.condition_note:
+            return "조건상이", f"당사{our_cond} / 타사{comp_cond}"
+        return "동일", ""
+    if our.is_conditional:
+        return "타사우위", f"조건없음 (당사{our_cond})"
+    if comp.is_conditional:
+        return "당사우위", f"조건없음 (타사{comp_cond})"
     return "동일", ""
 
 
