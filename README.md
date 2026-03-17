@@ -6,7 +6,6 @@ colorFrom: green
 colorTo: blue
 sdk: docker
 app_port: 7860
-thumbnail: https://huggingface.co/spaces/minkyyee/insurance-compare/resolve/main/image.png
 ---
 
 # InsureCompare — 보험 특약 비교 AI 솔루션
