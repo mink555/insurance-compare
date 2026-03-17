@@ -1,3 +1,13 @@
+---
+title: 라이나 인사이트 - 보험 상품 분석 솔루션
+short_description: 라이나생명 암보험 특약 비교 분석 플랫폼
+emoji: ⚖️
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 7860
+---
+
 # 보험 특약 비교 AI 솔루션
 
 라이나생명 사내 전용 보험 특약 비교 플랫폼. PDF 상품요약서를 자동 파싱하여 당사·타사 특약을 구조화된 데이터로 비교합니다.
