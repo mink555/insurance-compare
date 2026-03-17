@@ -31,7 +31,7 @@ from insurance_parser.summary_pipeline.store import ArtifactStore
 from insurance_parser.summary_pipeline.normalizer import to_comparison_rows
 from insurance_parser.summary_pipeline.detector import _SUMMARY_NAME_RE, _TERMS_NAME_RE
 from insurance_parser.report.generator import SummaryReportBuilder
-from insurance_parser.comparison.engine import build_comparison, ComparisonResult, rebuild_amount_table, build_insight_summary
+from insurance_parser.comparison.engine import build_comparison, ComparisonResult, rebuild_amount_table
 from insurance_parser.comparison.enrich import enrich_rows, resolve_mixed_pairs
 
 _store = ArtifactStore()
@@ -111,15 +111,6 @@ def _section_label(title: str) -> None:
 def _divider() -> None:
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
-
-def _card_stat(label: str, value: str, accent: str = "var(--g9)", sub: str = "") -> str:
-    return (
-        f'<div class="stat-card">'
-        f'<div class="detail-meta">{label}</div>'
-        f'<div class="detail-value" style="color:{accent};">{value}</div>'
-        f'{"<div class=detail-meta>" + sub + "</div>" if sub else ""}'
-        f'</div>'
-    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

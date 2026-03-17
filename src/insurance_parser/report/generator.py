@@ -170,25 +170,6 @@ class ComparisonReport:
                 refs[fld] = eid
         return refs
 
-    def _collect_detail_evidence(
-        self,
-        collector: EvidenceCollector,
-        detail_rows: list[dict],
-        side: str,
-        benefit_name: str,
-    ) -> list[str]:
-        """detail_rows에서 특정 급부의 모든 trigger를 Evidence로 수집."""
-        eids = []
-        for row in detail_rows:
-            if row.get("benefit_name", "") != benefit_name:
-                continue
-            trigger = row.get("trigger", "")
-            if trigger and trigger.strip():
-                eid = collector.add(side, "trigger_detail", benefit_name, row.get("contract_name", ""), trigger)
-                if eid:
-                    eids.append(eid)
-        return eids
-
     # ── 셀 값 포맷 (값 + Evidence ID) ────────────────────
 
     @staticmethod

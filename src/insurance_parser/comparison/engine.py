@@ -90,8 +90,6 @@ _RE_NUMBER = re.compile(r"[\d,]+")
 _RE_AMOUNT_WON = re.compile(r"([\d,]+)\s*만\s*원")
 # 지급한도 파싱: "최대 N년", "최초 N회", "연간 N회" 등에서 단위와 숫자 추출
 _RE_LIMIT = re.compile(r"(\d+)\s*(년|회)")
-_RE_LIMIT_UNIT_LABEL = re.compile(r"(최대|최초|연간|매년|매회)")
-
 
 def _parse_limit(text: str) -> tuple[str | None, int | None]:
     """지급한도 문자열 파싱 → (단위_키, 숫자).

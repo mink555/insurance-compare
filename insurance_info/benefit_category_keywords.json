@@ -32,7 +32,7 @@
       "label_ko": "납입면제"
     },
     "examination": {
-      "keywords": ["검사비", "검사비용", "검사자금", "PET", "NGS", "유전자패널", "바늘생검", "조직병리", "양전자단층", "PSMA"],
+      "keywords": ["검사비", "검사비용", "검사자금", "PET", "NGS", "유전자패널", "바늘생검", "조직병리", "양전자단층", "PSMA", "주요검사", "기타검사"],
       "label_ko": "검사"
     },
     "icu": {
@@ -44,12 +44,24 @@
       "label_ko": "다학제진료"
     },
     "supportive_care": {
-      "keywords": ["통증완화", "항구토", "영양치료", "집중영양"],
+      "keywords": ["통증완화", "항구토", "영양치료", "집중영양", "재활치료", "특정재활"],
       "label_ko": "지지요법"
     },
     "disability": {
-      "keywords": ["장해보험금", "장해급여금", "장해자금", "장해분류표"],
+      "keywords": ["장해보험금", "장해급여금", "장해자금", "장해분류표", "질병장해"],
       "label_ko": "장해"
+    },
+    "outpatient": {
+      "keywords": ["통원", "외래"],
+      "label_ko": "통원"
+    },
+    "nursing_hospital": {
+      "keywords": ["요양병원입원", "요양병원암입원"],
+      "label_ko": "요양병원"
+    },
+    "male_infertility": {
+      "keywords": ["남성난임", "정자채취"],
+      "label_ko": "기타"
     }
   },
 

@@ -1,10 +1,11 @@
 """Layer 1: 급부명 정규화 + canonical key 생성 + 매칭.
 
-LLM 호출 없음. 순수 Python + config/synonyms.json 외부 사전.
+LLM 호출 없음. 순수 Python + config/synonyms*.json 외부 사전.
 
 확장 방법:
-  - 새 동의어: config/synonyms.json에 추가 (코드 수정 불필요)
-  - 새 슬롯 카테고리: _SLOT_ORDER에 추가 + synonyms.json에 카테고리 추가
+  - 업계 공통 표현: config/synonyms.json에 추가
+  - 회사별 특수 표현: config/synonyms_<보험사명>.json에 추가 (파일 없으면 자동 무시)
+  - 새 슬롯 카테고리: _KEY_SLOTS에 추가 + synonyms.json에 카테고리 추가
 """
 from __future__ import annotations
 
@@ -16,34 +17,68 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_SYNONYMS_PATH = Path(__file__).resolve().parents[3] / "config" / "synonyms.json"
+_CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"
+_SYNONYMS_GENERIC = _CONFIG_DIR / "synonyms.json"
 
 _KEY_SLOTS = ("condition", "disease", "action")
-
 _TYPE_SUFFIXES = ("지원금", "급여금", "보험금", "치료비", "진단비", "자금", "비용")
 
 
 # ---------------------------------------------------------------------------
-# Synonyms loader (lazy singleton)
+# Synonyms loader: generic + 회사별 파일 자동 병합
 # ---------------------------------------------------------------------------
 
 _synonyms_cache: dict | None = None
 
 
 def _load_synonyms() -> dict[str, dict[str, list[str]]]:
+    """generic + 회사별 synonyms 파일을 모두 로드해 병합 반환.
+
+    병합 규칙: 같은 슬롯·canonical_label이 있으면 variants를 union.
+    """
     global _synonyms_cache
     if _synonyms_cache is not None:
         return _synonyms_cache
 
-    if not _SYNONYMS_PATH.is_file():
-        logger.warning("synonyms.json not found: %s — using empty dict", _SYNONYMS_PATH)
-        _synonyms_cache = {}
-        return _synonyms_cache
+    merged: dict[str, dict[str, list[str]]] = {}
 
-    with open(_SYNONYMS_PATH, encoding="utf-8") as f:
-        _synonyms_cache = json.load(f)
-    logger.info("Loaded synonyms.json: %s", {k: len(v) for k, v in _synonyms_cache.items()})
+    def _merge_file(path: Path) -> None:
+        if not path.is_file():
+            logger.warning("synonyms file not found: %s", path)
+            return
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        for slot, entries in data.items():
+            if slot.startswith("_"):   # _comment, _version, _insurer 등 메타 키 무시
+                continue
+            merged.setdefault(slot, {})
+            for label, variants in entries.items():
+                existing = merged[slot].setdefault(label, [])
+                for v in variants:
+                    if v not in existing:
+                        existing.append(v)
+
+    # 1) generic (필수)
+    _merge_file(_SYNONYMS_GENERIC)
+
+    # 2) 회사별 (자동 감지: synonyms_*.json)
+    for company_file in sorted(_CONFIG_DIR.glob("synonyms_*.json")):
+        _merge_file(company_file)
+        logger.info("Loaded company synonyms: %s", company_file.name)
+
+    _synonyms_cache = merged
+    logger.info(
+        "Synonyms loaded — slots: %s",
+        {slot: sum(len(vs) for vs in entries.values()) for slot, entries in merged.items()},
+    )
     return _synonyms_cache
+
+
+def invalidate_synonyms_cache() -> None:
+    """synonyms 캐시를 무효화. 파일 수정 후 재로드가 필요할 때 사용."""
+    global _synonyms_cache, _reverse_cache
+    _synonyms_cache = None
+    _reverse_cache = None
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +112,10 @@ def _build_reverse_map() -> dict[str, dict[str, str]]:
 
 _RE_PAREN = re.compile(r"\([^)]*\)")
 _RE_SPECIAL = re.compile(r"[·∙/,\s\u3000]+")
+
+
 def normalize_text(text: str) -> str:
-    """급부명 텍스트 정규화: 공백/괄호/특수문자/조사 제거.
+    """급부명 텍스트 정규화: 공백/괄호/특수문자 제거.
 
     >>> normalize_text("비급여(전액본인부담 포함) 항암약물 ·방사선치료자금")
     '비급여항암약물방사선치료자금'
@@ -87,8 +124,7 @@ def normalize_text(text: str) -> str:
         return ""
     text = _RE_PAREN.sub("", text)
     text = _RE_SPECIAL.sub("", text)
-    text = text.strip()
-    return text
+    return text.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -97,25 +133,29 @@ def normalize_text(text: str) -> str:
 
 def _extract_slot(normalized: str, category: str) -> str:
     """normalized 텍스트에서 category의 가장 긴 매칭 variant를 찾아 canonical label 반환."""
-    reverse_map = _build_reverse_map()
-    cat_map = reverse_map.get(category, {})
-    if not cat_map:
-        return ""
-
-    best_label = ""
-    best_len = 0
+    cat_map = _build_reverse_map().get(category, {})
+    best_label, best_len = "", 0
     for variant, label in cat_map.items():
         if variant in normalized and len(variant) > best_len:
-            best_label = label
-            best_len = len(variant)
+            best_label, best_len = label, len(variant)
     return best_label
 
 
-def _strip_type_suffix(text: str) -> str:
-    """Remove type suffix (자금/보험금/급여금/...) to prevent false condition matches.
+def _mask_action_variants(text: str) -> str:
+    """disease 추출 전 action variant를 공백으로 마스킹.
 
-    "급여금" contains "급여" which would be falsely detected as a condition.
+    '항암약물방사선치료' 안의 '암' → 일반암 오탐 방지.
+    action variant를 먼저 제거하면 disease 후보 범위가 순수해진다.
     """
+    action_map = _build_reverse_map().get("action", {})
+    # 길이 내림차순 정렬로 긴 것부터 제거 (부분 중복 방지)
+    for variant in sorted(action_map, key=len, reverse=True):
+        text = text.replace(variant, " " * len(variant))
+    return text
+
+
+def _strip_type_suffix(text: str) -> str:
+    """type 접미사 제거 — '급여금' → '급여' 오탐 방지."""
     for suffix in _TYPE_SUFFIXES:
         if text.endswith(suffix):
             return text[: -len(suffix)]
@@ -123,13 +163,8 @@ def _strip_type_suffix(text: str) -> str:
 
 
 _CATEGORY_KO_TO_ACTION = {
-    "진단": "진단",
-    "수술": "수술",
-    "치료": "치료",
-    "입원": "입원",
-    "통원": "통원",
-    "사망": "사망",
-    "장해": "장해",
+    "진단": "진단", "수술": "수술", "치료": "치료",
+    "입원": "입원", "통원": "통원", "사망": "사망", "장해": "장해",
 }
 
 
@@ -137,14 +172,14 @@ def canonical_key(benefit_name: str, category_ko: str = "") -> str:
     """급부명 → canonical key 문자열.
 
     1. 정규화 (공백/괄호/특수문자 제거)
-    2. type 접미사 제거 (자금/보험금/급여금 — 회사별 명명 차이일 뿐)
-    3. condition | disease | action 슬롯 추출
-       - stripped 텍스트 우선, 슬롯 없으면 norm(접미사 제거 전)으로 재시도
-       - action이 비어있으면 category_ko fallback 사용 (예: '갑상선암' + cat='진단' → '갑상선암|진단')
+    2. type 접미사 제거 (자금/보험금/급여금 — 회사별 명명 차이)
+    3. condition | disease | action 슬롯 추출 (longest-match)
+       - disease: action variant를 먼저 마스킹 후 추출 (오탐 방지)
+       - action 미추출 시 benefit_category_ko fallback
     4. 빈 슬롯 제외하고 '|'로 결합
 
     >>> canonical_key("비급여(전액본인부담 포함) 항암약물 ·방사선치료자금")
-    '비급여|항암약물'
+    '비급여|항암방사선'
     >>> canonical_key("갑상선암", "진단")
     '갑상선암|진단'
     """
@@ -153,26 +188,24 @@ def canonical_key(benefit_name: str, category_ko: str = "") -> str:
         return ""
 
     stripped = _strip_type_suffix(norm)
+    # disease 추출 전용: action variant 마스킹으로 '항암약물' 안의 '암' 오탐 방지
+    stripped_for_disease = _mask_action_variants(stripped)
 
     slots: list[str] = []
     for cat in _KEY_SLOTS:
-        # action 슬롯은 type suffix 제거 전 norm으로도 재시도
-        # (예: '항암치료비' → stripped='항암', norm에서 '항암치료비' variant 매칭)
-        # condition/disease는 stripped만 사용 (norm fallback 시 '급여금' → '급여' 오탐 방지)
-        if cat == "action":
+        if cat == "disease":
+            val = _extract_slot(stripped_for_disease, cat)
+        elif cat == "action":
             val = _extract_slot(stripped, cat) or _extract_slot(norm, cat)
-            # action 미추출 시 benefit_category_ko로 fallback
             if not val and category_ko:
                 val = _CATEGORY_KO_TO_ACTION.get(category_ko, "")
         else:
+            # condition: stripped 사용 (오탐 방지)
             val = _extract_slot(stripped, cat)
         if val:
             slots.append(val)
 
-    if not slots:
-        return norm
-
-    return "|".join(slots)
+    return "|".join(slots) if slots else norm
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +217,7 @@ class MatchedPair:
     canonical_key: str
     our_row: dict | None = None
     comp_row: dict | None = None
-    match_type: str = ""  # "matched" | "our_only" | "comp_only"
+    match_type: str = ""   # "matched" | "our_only" | "comp_only"
     our_name: str = ""
     comp_name: str = ""
 
@@ -203,9 +236,7 @@ def _build_key_map(rows: list[dict]) -> dict[str, list[dict]]:
     """rows → {canonical_key: [row, ...]}."""
     key_map: dict[str, list[dict]] = {}
     for row in rows:
-        bn = row.get("benefit_name", "")
-        cat_ko = row.get("benefit_category_ko", "")
-        ck = canonical_key(bn, cat_ko)
+        ck = canonical_key(row.get("benefit_name", ""), row.get("benefit_category_ko", ""))
         key_map.setdefault(ck, []).append(row)
     return key_map
 
@@ -217,13 +248,10 @@ def match_benefits(our_rows: list[dict], comp_rows: list[dict]) -> MatchResult:
     """
     our_map = _build_key_map(our_rows)
     comp_map = _build_key_map(comp_rows)
-
     all_keys = dict.fromkeys(list(our_map) + list(comp_map))
 
     pairs: list[MatchedPair] = []
-    matched = 0
-    our_only = 0
-    comp_only = 0
+    matched = our_only = comp_only = 0
 
     for ck in all_keys:
         ours = our_map.get(ck, [])
@@ -236,96 +264,52 @@ def match_benefits(our_rows: list[dict], comp_rows: list[dict]) -> MatchResult:
                 if best_idx is not None:
                     c = comps[best_idx]
                     used_comp.add(best_idx)
-                    pairs.append(MatchedPair(
-                        canonical_key=ck,
-                        our_row=o,
-                        comp_row=c,
-                        match_type="matched",
-                        our_name=o.get("benefit_name", ""),
-                        comp_name=c.get("benefit_name", ""),
-                    ))
+                    pairs.append(MatchedPair(ck, o, c, "matched",
+                                             o.get("benefit_name", ""), c.get("benefit_name", "")))
                     matched += 1
                 else:
-                    pairs.append(MatchedPair(
-                        canonical_key=ck,
-                        our_row=o,
-                        match_type="our_only",
-                        our_name=o.get("benefit_name", ""),
-                    ))
+                    pairs.append(MatchedPair(ck, o, None, "our_only", o.get("benefit_name", "")))
                     our_only += 1
-
             for idx, c in enumerate(comps):
                 if idx not in used_comp:
-                    pairs.append(MatchedPair(
-                        canonical_key=ck,
-                        comp_row=c,
-                        match_type="comp_only",
-                        comp_name=c.get("benefit_name", ""),
-                    ))
+                    pairs.append(MatchedPair(ck, None, c, "comp_only",
+                                             comp_name=c.get("benefit_name", "")))
                     comp_only += 1
 
         elif ours:
             for o in ours:
-                pairs.append(MatchedPair(
-                    canonical_key=ck,
-                    our_row=o,
-                    match_type="our_only",
-                    our_name=o.get("benefit_name", ""),
-                ))
+                pairs.append(MatchedPair(ck, o, None, "our_only", o.get("benefit_name", "")))
                 our_only += 1
-
         else:
             for c in comps:
-                pairs.append(MatchedPair(
-                    canonical_key=ck,
-                    comp_row=c,
-                    match_type="comp_only",
-                    comp_name=c.get("benefit_name", ""),
-                ))
+                pairs.append(MatchedPair(ck, None, c, "comp_only",
+                                         comp_name=c.get("benefit_name", "")))
                 comp_only += 1
 
     logger.info(
         "match_benefits: our=%d comp=%d → matched=%d our_only=%d comp_only=%d",
         len(our_rows), len(comp_rows), matched, our_only, comp_only,
     )
-
-    return MatchResult(
-        pairs=pairs,
-        our_count=len(our_rows),
-        comp_count=len(comp_rows),
-        matched_count=matched,
-        our_only_count=our_only,
-        comp_only_count=comp_only,
-    )
+    return MatchResult(pairs, len(our_rows), len(comp_rows), matched, our_only, comp_only)
 
 
-def _find_best_match(
-    our_row: dict,
-    comp_rows: list[dict],
-    used: set[int],
-) -> int | None:
-    """comp_rows 중 사용되지 않은 것에서 가장 유사한 행을 찾아 index 반환."""
+def _find_best_match(our_row: dict, comp_rows: list[dict], used: set[int]) -> int | None:
+    """comp_rows 중 미사용 행 중 가장 유사한 것의 index 반환."""
     our_amt = our_row.get("amount", "")
-
-    best_idx: int | None = None
-    best_score = -1
-
+    best_idx, best_score = None, -1.0
     for idx, c in enumerate(comp_rows):
         if idx in used:
             continue
         score = _amount_similarity(our_amt, c.get("amount", ""))
         if score > best_score:
-            best_score = score
-            best_idx = idx
-
+            best_score, best_idx = score, idx
     return best_idx
 
 
 def _amount_similarity(a: str, b: str) -> float:
-    """두 금액 문자열의 유사도 (0-1). 같으면 1, 다르면 글자 겹침 비율."""
+    """두 금액 문자열의 유사도 (0~1). 같으면 1.0."""
     if a == b:
         return 1.0
     if not a or not b:
         return 0.0
-    common = len(set(a) & set(b))
-    return common / max(len(set(a)), len(set(b)))
+    return len(set(a) & set(b)) / max(len(set(a)), len(set(b)))
