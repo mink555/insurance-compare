@@ -357,8 +357,6 @@ div[data-testid="stTabPanel"] div[data-testid="stVerticalBlock"] { gap: var(--sp
 .tbl .col-comp-cell { background: rgba(254,226,226,.04); }
 .tbl .col-status, .rpt-tbl .col-status { min-width: 90px; text-align: center; white-space: normal; vertical-align: middle; }
 .tbl td.row-diff { background: rgba(251,191,36,.04); }
-.rationale { font-size: 11px; color: var(--g5); font-weight: 400; margin-top: 3px; line-height: 1.4; white-space: normal; word-break: keep-all; }
-
 .cell-clamp { white-space: normal; word-break: keep-all; line-height: 1.5; }
 .cell-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; max-height: 4.4em; line-height: 1.45; }
 .text-muted { color: var(--g4); }

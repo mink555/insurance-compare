@@ -854,14 +854,14 @@ def _render_compare_step(
             thead2 = f'<tr><th>급부</th><th class="col-our">{our_label}</th><th class="col-comp">{comp_label}</th><th class="col-status">판정</th></tr>'
             rows2 = []
             for r in dim_rows:
-                o_val = r["our_value"] or "—"
-                c_val = r["comp_value"] or "—"
+                o_val = (r["our_value"] or "—").replace("\n", "<br>")
+                c_val = (r["comp_value"] or "—").replace("\n", "<br>")
                 adv = r["advantage"]
                 diff_cls = ' row-diff' if adv in ("당사우위", "타사우위") else ''
                 rows2.append(
                     f'<tr><td class="row-label cell-clamp">{r["benefit"]}</td>'
-                    f'<td class="col-our-cell{diff_cls}"><div class="cell-clamp">{o_val}</div></td>'
-                    f'<td class="col-comp-cell{diff_cls}"><div class="cell-clamp">{c_val}</div></td>'
+                    f'<td class="col-our-cell{diff_cls}" style="white-space:normal;line-height:1.6;font-size:12px">{o_val}</td>'
+                    f'<td class="col-comp-cell{diff_cls}" style="white-space:normal;line-height:1.6;font-size:12px">{c_val}</td>'
                     f'<td class="col-status">{_status_html(adv)}</td></tr>'
                 )
             st.markdown(
@@ -891,8 +891,6 @@ def _render_compare_step(
     rows3 = []
     for row in result.amount_table:
         diff_cls = ' row-diff' if row["status"] in ("당사우위", "타사우위", "금액상이", "조건상이") else ''
-        rat = row.get("rationale", "") if row.get("status") != "조건상이" else ""
-        rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
         our_amt = (row["our_amount"] or "—").replace("\n", "<br>")
         comp_amt = (row["comp_amount"] or "—").replace("\n", "<br>")
         rows3.append(
@@ -900,7 +898,7 @@ def _render_compare_step(
             f'<td class="row-label cell-clamp">{row["comp_name"]}</td>'
             f'<td class="text-our col-our-cell{diff_cls}" style="white-space:normal;line-height:1.6;font-size:12px">{our_amt}</td>'
             f'<td class="text-comp col-comp-cell{diff_cls}" style="white-space:normal;line-height:1.6;font-size:12px">{comp_amt}</td>'
-            f'<td class="col-status">{_status_html(row["status"])}{rat_html}</td></tr>'
+            f'<td class="col-status">{_status_html(row["status"])}</td></tr>'
         )
     st.markdown(
         f'<table class="tbl"><colgroup><col style="width:20%"><col style="width:20%"><col style="width:17%"><col style="width:17%"><col style="width:26%"></colgroup><thead>{thead3}</thead><tbody>{"".join(rows3)}</tbody></table>',
@@ -1154,8 +1152,6 @@ def _render_rpt_comparison(report, ev_map: dict) -> None:
         a_rows = []
         for row in cr.amount_table:
             diff_cls = ' row-diff' if row["status"] in ("당사우위", "타사우위", "금액상이", "조건상이") else ''
-            rat = row.get("rationale", "") if row.get("status") != "조건상이" else ""
-            rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
             our_eid = _find_eid(ev_map, "당사", "amount", row["our_name"])
             comp_eid = _find_eid(ev_map, "타사", "amount", row["comp_name"])
             our_amt = (row["our_amount"] or "").replace("\n", "<br>")
@@ -1167,7 +1163,7 @@ def _render_rpt_comparison(report, ev_map: dict) -> None:
                 f'<td class="row-label cell-clamp">{row["comp_name"]}</td>'
                 f'<td class="text-our col-our-cell{diff_cls}" style="white-space:normal;line-height:1.6;font-size:12px">{our_amt_html}</td>'
                 f'<td class="text-comp col-comp-cell{diff_cls}" style="white-space:normal;line-height:1.6;font-size:12px">{comp_amt_html}</td>'
-                f'<td class="col-status">{_status_html(row["status"])}{rat_html}</td></tr>'
+                f'<td class="col-status">{_status_html(row["status"])}</td></tr>'
             )
         cg5 = '<colgroup><col style="width:20%"><col style="width:20%"><col style="width:17%"><col style="width:17%"><col style="width:26%"></colgroup>'
         st.markdown(_rpt_table(a_thead, a_rows, cg5), unsafe_allow_html=True)
@@ -1310,15 +1306,15 @@ def _render_rpt_analysis(report, ev_map: dict) -> None:
             d_thead = f'<tr><th>급부</th><th class="col-our">{our_l}</th><th class="col-comp">{comp_l}</th><th class="col-status">판정</th></tr>'
             d_rows = []
             for cp in diff_pairs[:10]:
-                rat = (cp.rationale or "") if cp.overall_advantage != "조건상이" else ""
-                rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
                 our_eid = _find_eid(ev_map, "당사", "amount", cp.our_name)
                 comp_eid = _find_eid(ev_map, "타사", "amount", cp.comp_name)
+                our_amt = (cp.our_amount or "").replace("\n", "<br>")
+                comp_amt = (cp.comp_amount or "").replace("\n", "<br>")
                 d_rows.append(
                     f'<tr><td class="row-label cell-clamp">{cp.our_name}</td>'
-                    f'<td class="text-our">{_cell_v(cp.our_amount or "", our_eid)}</td>'
-                    f'<td class="text-comp">{_cell_v(cp.comp_amount or "", comp_eid)}</td>'
-                    f'<td class="col-status">{_status_html(cp.overall_advantage)}{rat_html}</td></tr>'
+                    f'<td class="text-our" style="white-space:normal;line-height:1.6;font-size:12px">{_cell_v(our_amt, our_eid)}</td>'
+                    f'<td class="text-comp" style="white-space:normal;line-height:1.6;font-size:12px">{_cell_v(comp_amt, comp_eid)}</td>'
+                    f'<td class="col-status">{_status_html(cp.overall_advantage)}</td></tr>'
                 )
             cg4d = '<colgroup><col style="width:30%"><col style="width:20%"><col style="width:20%"><col style="width:30%"></colgroup>'
             st.markdown(_rpt_table(d_thead, d_rows, cg4d), unsafe_allow_html=True)
