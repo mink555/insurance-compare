@@ -891,11 +891,13 @@ def _render_compare_step(
         diff_cls = ' row-diff' if row["status"] in ("당사우위", "타사우위", "금액상이", "조건상이") else ''
         rat = row.get("rationale", "")
         rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
+        our_amt_html = (row["our_amount"] or "—").replace("\n", "<br>")
+        comp_amt_html = (row["comp_amount"] or "—").replace("\n", "<br>")
         rows3.append(
             f'<tr><td class="row-label cell-clamp">{row["our_name"]}</td>'
             f'<td class="row-label cell-clamp">{row["comp_name"]}</td>'
-            f'<td class="text-our col-our-cell{diff_cls}">{row["our_amount"] or "—"}</td>'
-            f'<td class="text-comp col-comp-cell{diff_cls}">{row["comp_amount"] or "—"}</td>'
+            f'<td class="text-our col-our-cell{diff_cls}">{our_amt_html}</td>'
+            f'<td class="text-comp col-comp-cell{diff_cls}">{comp_amt_html}</td>'
             f'<td class="col-status">{_status_html(row["status"])}{rat_html}</td></tr>'
         )
     st.markdown(
@@ -1154,8 +1156,8 @@ def _render_rpt_comparison(report, ev_map: dict) -> None:
             rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
             our_eid = _find_eid(ev_map, "당사", "amount", row["our_name"])
             comp_eid = _find_eid(ev_map, "타사", "amount", row["comp_name"])
-            our_amt_html = _cell_v(row["our_amount"] or "", our_eid)
-            comp_amt_html = _cell_v(row["comp_amount"] or "", comp_eid)
+            our_amt_html = _cell_v((row["our_amount"] or "").replace("\n", "<br>"), our_eid)
+            comp_amt_html = _cell_v((row["comp_amount"] or "").replace("\n", "<br>"), comp_eid)
             a_rows.append(
                 f'<tr><td class="row-label cell-clamp">{row["our_name"]}</td>'
                 f'<td class="row-label cell-clamp">{row["comp_name"]}</td>'
