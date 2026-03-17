@@ -138,6 +138,7 @@ class ComparisonReport:
     detail_base: list[dict] = field(default_factory=list)
     detail_comp: list[dict] = field(default_factory=list)
     evidences: list[Evidence] = field(default_factory=list)
+    insight: dict = field(default_factory=dict)
     _cached_markdown: str = field(default="", repr=False, compare=False)
 
     def _our_label(self) -> str:
@@ -202,55 +203,52 @@ class ComparisonReport:
     def _section1_lines(self) -> list[str]:
         lines: list[str] = []
         our_l, comp_l = self._our_label(), self._comp_label()
-        base_map = {r.get("benefit_name", ""): r for r in self.base_rows}
-        comp_map = {r.get("benefit_name", ""): r for r in self.comp_rows}
-
-        our_cats = sorted({r.get("benefit_category_ko", "") for r in self.base_rows} - {""})
-        comp_cats = sorted({r.get("benefit_category_ko", "") for r in self.comp_rows} - {""})
 
         lines.append("# 암 특약 비교 리포트 (약관 Evidence 기반)\n")
         lines.append(f"**당사**: {self.base_label}  ")
         lines.append(f"**타사**: {self.comp_label}\n")
         lines.append("---\n")
-
         lines.append("## 1. 전략적 요약\n")
 
-        # 한줄평
-        cancer_classes_base = sorted({_classify_cancer(n) for n in base_map} - {""})
-        cancer_classes_comp = sorted({_classify_cancer(n) for n in comp_map} - {""})
-        base_scope = ", ".join(cancer_classes_base[:3]) or ", ".join(our_cats[:3]) or "다양한 급부"
-        comp_scope = ", ".join(cancer_classes_comp[:3]) or ", ".join(comp_cats[:3]) or "다양한 급부"
+        ins = self.insight
+        if ins:
+            position  = ins.get("position", "")
+            headline  = ins.get("headline", "")
+            key_points = ins.get("key_points", [])
+            top_gaps   = ins.get("top_gaps", [])
 
-        lines.append("**한줄평**\n")
-        lines.append(
-            f"> 본 특약은 **암보장개시일 이후 암으로 진단확정된 경우 보험금을 지급하는 "
-            f"정액형 암보장 구조**를 기반으로 한다. "
-            f"{our_l}은 {base_scope} 보장, "
-            f"{comp_l}은 {comp_scope} 보장 중심이다.\n"
-        )
+            # 포지션 레이블
+            pos_map = {"우위": "▲ 당사 우위", "열위": "▼ 당사 열위", "혼재": "◎ 혼재", "단독보장중심": "— 단독 위주"}
+            pos_label = pos_map.get(position, position)
 
-        lines.append("**Key Point**\n")
-        lines.append(
-            "> 보험금 지급 여부는 **약관에서 정의한 암 범위(KCD 기준)와 "
-            "진단확정 시점, 보장개시일 이후 여부**에 따라 결정된다.\n"
-        )
+            lines.append(f"**한줄평**: {pos_label} — {headline}\n")
 
-        # 수치 요약
-        only_our = [n for n in base_map if n not in comp_map]
-        only_comp = [n for n in comp_map if n not in base_map]
-        diff_cnt = sum(
-            1 for n in base_map if n in comp_map
-            and base_map[n].get("amount", "") != comp_map[n].get("amount", "")
-        )
+            if top_gaps:
+                best = top_gaps[0]
+                side_l = our_l if best["side"] == "당사우위" else comp_l
+                lines.append(
+                    f"> 최대 격차: **{best['name']}** — {our_l} {best['our_amt']} vs "
+                    f"{comp_l} {best['comp_amt']} ({best['gap_pct']:+d}% {side_l})\n"
+                )
 
-        lines.append(f"- 당사 {len(self.base_rows)}건 vs 타사 {len(self.comp_rows)}건 급부")
-        if only_our:
-            lines.append(f"- 당사 단독 보장 {len(only_our)}건: {', '.join(only_our[:3])}")
-        if only_comp:
-            lines.append(f"- 타사 단독 보장 {len(only_comp)}건: {', '.join(only_comp[:3])}")
-        if diff_cnt:
-            lines.append(f"- 양사 공통 급부 중 금액 상이 {diff_cnt}건")
-        lines.append("")
+            lines.append("**Key Selling Points**\n")
+            type_icon = {"strength": "✓", "weakness": "✗", "gap": "⊙", "condition": "ℹ"}
+            for kp in key_points:
+                icon = type_icon.get(kp.get("type", ""), "·")
+                lines.append(f"- {icon} **{kp['label']}**: {kp['desc']}")
+            lines.append("")
+        else:
+            # fallback: insight 없을 때
+            base_map = {r.get("benefit_name", ""): r for r in self.base_rows}
+            comp_map = {r.get("benefit_name", ""): r for r in self.comp_rows}
+            only_our  = [n for n in base_map if n not in comp_map]
+            only_comp = [n for n in comp_map if n not in base_map]
+            lines.append(f"- {our_l} {len(self.base_rows)}건 vs {comp_l} {len(self.comp_rows)}건 급부")
+            if only_our:
+                lines.append(f"- 당사 단독 보장 {len(only_our)}건: {', '.join(only_our[:3])}")
+            if only_comp:
+                lines.append(f"- 타사 단독 보장 {len(only_comp)}건: {', '.join(only_comp[:3])}")
+            lines.append("")
         return lines
 
     # ── §2 핵심 비교내용 ────────────────────────────────

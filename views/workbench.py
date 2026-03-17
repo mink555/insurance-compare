@@ -31,7 +31,7 @@ from insurance_parser.summary_pipeline.store import ArtifactStore
 from insurance_parser.summary_pipeline.normalizer import to_comparison_rows
 from insurance_parser.summary_pipeline.detector import _SUMMARY_NAME_RE, _TERMS_NAME_RE
 from insurance_parser.report.generator import SummaryReportBuilder
-from insurance_parser.comparison.engine import build_comparison, ComparisonResult, rebuild_amount_table
+from insurance_parser.comparison.engine import build_comparison, ComparisonResult, rebuild_amount_table, build_insight_summary
 from insurance_parser.comparison.enrich import enrich_rows, resolve_mixed_pairs
 
 _store = ArtifactStore()
@@ -630,6 +630,143 @@ def _render_benefit_expander(row: dict, detail_df: Optional[pd.DataFrame], badge
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
+_POSITION_STYLE = {
+    "우위":         ("var(--teal-700)",  "var(--teal-50)",  "▲ 당사 우위"),
+    "열위":         ("var(--comp-700)",  "var(--comp-50)",  "▼ 당사 열위"),
+    "혼재":         ("var(--amber-700)", "var(--amber-50)", "◎ 혼재"),
+    "단독보장중심": ("var(--gray-700)",  "var(--gray-50)",  "— 단독 위주"),
+}
+
+_KP_STYLE = {
+    "strength": ("var(--teal-700)",  "var(--teal-50)",  "✓"),
+    "weakness": ("var(--comp-700)",  "var(--comp-50)",  "✗"),
+    "gap":      ("var(--amber-700)", "var(--amber-50)", "⊙"),
+    "condition":("var(--gray-700)",  "var(--gray-100)", "ℹ"),
+}
+
+
+def _render_insight_card(ins: dict, our_label: str, comp_label: str) -> None:
+    """인사이트 요약 카드 — 한줄평 + Key Selling Points.
+
+    순수 계산된 수치만 표시. 데이터 없는 항목은 자동으로 숨김.
+    """
+    position = ins.get("position", "혼재")
+    headline = ins.get("headline", "")
+    key_points = ins.get("key_points", [])
+    top_gaps = ins.get("top_gaps", [])
+    cat_score = ins.get("cat_score", {})
+
+    pos_color, pos_bg, pos_label = _POSITION_STYLE.get(position, _POSITION_STYLE["혼재"])
+
+    # ── 헤드라인 배너 ──
+    st.markdown(
+        f'<div style="background:{pos_bg};border-left:4px solid {pos_color};'
+        f'border-radius:8px;padding:14px 18px;margin:12px 0 6px;">'
+        f'<div style="display:flex;align-items:center;gap:10px;">'
+        f'<span style="color:{pos_color};font-weight:700;font-size:15px;">{pos_label}</span>'
+        f'<span style="color:var(--gray-700);font-size:13px;">{headline}</span>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    if not key_points and not top_gaps:
+        return
+
+    # ── Key Points 그리드 ──
+    kp_html_parts = []
+    for kp in key_points:
+        ktype = kp.get("type", "condition")
+        color, bg, icon = _KP_STYLE.get(ktype, _KP_STYLE["condition"])
+        label = kp.get("label", "")
+        desc  = kp.get("desc", "")
+        kp_html_parts.append(
+            f'<div style="background:{bg};border:1px solid {color}22;border-radius:8px;'
+            f'padding:12px 14px;min-width:0;">'
+            f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;">'
+            f'<span style="color:{color};font-weight:700;font-size:13px;">{icon} {label}</span>'
+            f'</div>'
+            f'<div style="color:var(--gray-700);font-size:12px;line-height:1.55;">{desc}</div>'
+            f'</div>'
+        )
+
+    if kp_html_parts:
+        cols_css = "1fr " * min(len(kp_html_parts), 2)
+        st.markdown(
+            f'<div style="display:grid;grid-template-columns:{cols_css.strip()};'
+            f'gap:10px;margin:6px 0 10px;">'
+            + "".join(kp_html_parts)
+            + '</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── 금액 격차 Top 3 (있을 때만) ──
+    if top_gaps:
+        rows_html = ""
+        for g in top_gaps:
+            side_color = "var(--teal-700)" if g["side"] == "당사우위" else "var(--comp-700)"
+            side_label = our_label if g["side"] == "당사우위" else comp_label
+            pct = g["gap_pct"]
+            pct_str = f"{pct:+d}%"
+            rows_html += (
+                f'<tr>'
+                f'<td style="padding:5px 10px;font-size:12px;">{g["name"]}</td>'
+                f'<td style="padding:5px 10px;font-size:12px;color:var(--teal-700);">{g["our_amt"]}</td>'
+                f'<td style="padding:5px 10px;font-size:12px;color:var(--comp-700);">{g["comp_amt"]}</td>'
+                f'<td style="padding:5px 10px;font-size:12px;color:{side_color};font-weight:600;">'
+                f'{pct_str} {side_label}</td>'
+                f'</tr>'
+            )
+        st.markdown(
+            f'<div style="margin-bottom:10px;">'
+            f'<div style="font-size:11px;color:var(--gray-500);font-weight:600;'
+            f'letter-spacing:.04em;margin-bottom:4px;">금액 격차 상위</div>'
+            f'<table style="width:100%;border-collapse:collapse;">'
+            f'<thead><tr style="border-bottom:1px solid var(--gray-200);">'
+            f'<th style="padding:4px 10px;font-size:11px;color:var(--gray-500);text-align:left;">급부명</th>'
+            f'<th style="padding:4px 10px;font-size:11px;color:var(--teal-600);text-align:left;">{our_label}</th>'
+            f'<th style="padding:4px 10px;font-size:11px;color:var(--comp-600);text-align:left;">{comp_label}</th>'
+            f'<th style="padding:4px 10px;font-size:11px;color:var(--gray-500);text-align:left;">격차</th>'
+            f'</tr></thead>'
+            f'<tbody>{rows_html}</tbody>'
+            f'</table>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── 카테고리별 경쟁력 바 (매칭 있을 때만) ──
+    if cat_score:
+        bars_html = ""
+        for cat, sc in sorted(cat_score.items(), key=lambda x: -(x[1]["우"] - x[1]["열"])):
+            total = sc["우"] + sc["열"] + sc["동"]
+            if total == 0:
+                continue
+            our_w = sc["우"] / total * 100
+            comp_w = sc["열"] / total * 100
+            eq_w = sc["동"] / total * 100
+            bars_html += (
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+                f'<span style="width:40px;font-size:11px;color:var(--gray-600);flex-shrink:0;">{cat}</span>'
+                f'<div style="flex:1;display:flex;height:10px;border-radius:4px;overflow:hidden;">'
+                + (f'<div style="width:{our_w:.0f}%;background:var(--teal-400);"></div>' if our_w else "")
+                + (f'<div style="width:{eq_w:.0f}%;background:var(--gray-200);"></div>' if eq_w else "")
+                + (f'<div style="width:{comp_w:.0f}%;background:var(--comp-300);"></div>' if comp_w else "")
+                + f'</div>'
+                f'<span style="font-size:10px;color:var(--gray-500);flex-shrink:0;">'
+                f'{sc["우"]}우·{sc["동"]}동·{sc["열"]}열</span>'
+                f'</div>'
+            )
+        if bars_html:
+            st.markdown(
+                f'<div style="margin-bottom:12px;">'
+                f'<div style="font-size:11px;color:var(--gray-500);font-weight:600;'
+                f'letter-spacing:.04em;margin-bottom:6px;">카테고리별 경쟁력</div>'
+                + bars_html
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+
+
 def _apply_slots_cache(rows: list[dict]) -> list[dict]:
     """session_state에 캐시된 슬롯을 rows에 적용."""
     cache: dict = st.session_state.get("wb_slots_cache", {})
@@ -662,7 +799,7 @@ def _gen_report(ctx, our_df, comp_df, our_detail, comp_detail):
         f"{ctx.get('comp_co','')} · {ctx.get('comp_prod','')} · "
         f"{ctx.get('comp_rider','전체')}"
     )
-    return builder.build(
+    report = builder.build(
         base_df=our_df,
         comp_df=comp_df,
         base_label=our_label_full,
@@ -670,6 +807,11 @@ def _gen_report(ctx, our_df, comp_df, our_detail, comp_detail):
         detail_base_df=our_detail if not our_detail.empty else None,
         detail_comp_df=comp_detail if not comp_detail.empty else None,
     )
+    # 인사이트 데이터를 리포트에 주입 (§1 전략적 요약에 사용)
+    cr: ComparisonResult | None = st.session_state.get("wb_comparison_result")
+    if cr and cr.insight:
+        report.insight = cr.insight
+    return report
 
 
 def _render_compare_step(
@@ -738,6 +880,7 @@ def _render_compare_step(
     st.session_state["wb_comparison_result"] = result
 
     s = result.summary
+    ins = result.insight
 
     # ── Sticky summary bar ──
     st.markdown(
@@ -752,6 +895,9 @@ def _render_compare_step(
         f'</div>',
         unsafe_allow_html=True,
     )
+
+    # ── 인사이트 카드 ──────────────────────────────────────────
+    _render_insight_card(ins, our_label, comp_label)
 
     # ─────────────────────────────────────────────
     #  Card 1: 보장 범위 비교 (coverage_summary 기반)
@@ -1071,39 +1217,82 @@ def _rpt_table(thead: str, rows: list[str], colgroup: str = "") -> str:
 
 def _render_rpt_hero(report, ctx: dict) -> None:
     cr: ComparisonResult | None = st.session_state.get("wb_comparison_result")
-    if cr:
-        s = cr.summary
-        kps = [f"매칭 급부 {s['matched']}건, 전체 {s['total']}건"]
-        if s["our_only"]:
-            our_names = [cp.our_name for cp in cr.only_our[:3]]
-            kps.append(f"당사 단독 보장 {s['our_only']}건: {', '.join(our_names)}")
-        if s["comp_only"]:
-            comp_names = [cp.comp_name for cp in cr.only_comp[:3]]
-            kps.append(f"타사 단독 보장 {s['comp_only']}건: {', '.join(comp_names)}")
-        if s["diff"]:
-            kps.append(f"조건/금액 상이 {s['diff']}건")
+    our_l  = report.base_label.split(" · ")[0] if report.base_label else "당사"
+    comp_l = report.comp_label.split(" · ")[0] if report.comp_label else "타사"
+
+    if cr and cr.insight:
+        ins = cr.insight
+        s   = cr.summary
+        position  = ins.get("position", "")
+        headline  = ins.get("headline", "")
+        key_points = ins.get("key_points", [])
+        top_gaps   = ins.get("top_gaps", [])
+
+        # 포지션 배지
+        pos_color, _, pos_label = _POSITION_STYLE.get(position, ("var(--gray-600)", "", position))
+
+        # Key Points → 텍스트 목록
+        kp_items_html = ""
+        for kp in key_points:
+            ktype = kp.get("type", "condition")
+            icon_map = {"strength": "✓", "weakness": "✗", "gap": "⊙", "condition": "ℹ"}
+            color_map = {"strength": "var(--teal-700)", "weakness": "var(--comp-700)",
+                         "gap": "var(--amber-700)", "condition": "var(--gray-600)"}
+            icon  = icon_map.get(ktype, "·")
+            color = color_map.get(ktype, "var(--gray-600)")
+            kp_items_html += (
+                f'<div class="rpt-hero-kp-item">'
+                f'<span style="color:{color};font-weight:700;">{icon} {kp["label"]}</span> '
+                f'— {kp["desc"]}'
+                f'</div>'
+            )
+
+        # 금액 격차 요약 (있을 때만)
+        gap_html = ""
+        if top_gaps:
+            best = top_gaps[0]
+            side_l = our_l if best["side"] == "당사우위" else comp_l
+            gap_html = (
+                f'<div style="font-size:12px;color:var(--gray-600);margin-top:6px;">'
+                f'최대 격차: <b>{best["name"]}</b> — {our_l} {best["our_amt"]} vs {comp_l} {best["comp_amt"]} '
+                f'(<span style="font-weight:700;">{best["gap_pct"]:+d}% {side_l}</span>)'
+                f'</div>'
+            )
+
+        st.markdown(
+            f'<div class="rpt-hero">'
+            f'<div class="rpt-hero-label">[Executive Summary] 전략적 요약</div>'
+            f'<div class="rpt-hero-headline">'
+            f'<span style="color:{pos_color};font-weight:700;">{pos_label}</span> &nbsp;'
+            f'<span style="font-size:14px;color:var(--gray-700);">{headline}</span>'
+            f'</div>'
+            f'{gap_html}'
+            f'<div class="rpt-hero-kp">'
+            f'<div class="rpt-hero-kp-title">Key Selling Points</div>'
+            f'{kp_items_html}'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
     else:
+        # fallback: insight 없을 때 (구버전 세션)
+        s = cr.summary if cr else {}
         kps = [f"당사 {len(report.base_rows)}건 vs 타사 {len(report.comp_rows)}건"]
-
-    kp_items = "".join(f'<div class="rpt-hero-kp-item">{kp}</div>' for kp in kps)
-
-    st.markdown(
-        f'<div class="rpt-hero">'
-        f'<div class="rpt-hero-label">[Executive Summary] 전략적 요약</div>'
-        f'<div class="rpt-hero-headline">'
-        f'<b>한 줄 평</b>: 본 특약은 암보장개시일 이후 암으로 진단확정된 경우 보험금을 지급하는 '
-        f'정액형 암보장 구조를 기반으로 합니다.'
-        f'</div>'
-        f'<div class="rpt-hero-sub">'
-        f'<b>Key Selling Point</b>: 보험금 지급 여부는 약관에서 정의한 암 범위(KCD 기준)와 진단확정 시점, '
-        f'보장개시일 이후 여부에 따라 결정됩니다.'
-        f'</div>'
-        f'<div class="rpt-hero-kp">'
-        f'<div class="rpt-hero-kp-title">Key Points</div>'
-        f'{kp_items}'
-        f'</div></div>',
-        unsafe_allow_html=True,
-    )
+        if s.get("our_only"):
+            kps.append(f"당사 단독 보장 {s['our_only']}건")
+        if s.get("comp_only"):
+            kps.append(f"타사 단독 보장 {s['comp_only']}건")
+        if s.get("diff"):
+            kps.append(f"조건/금액 상이 {s['diff']}건")
+        kp_items_html = "".join(f'<div class="rpt-hero-kp-item">{kp}</div>' for kp in kps)
+        st.markdown(
+            f'<div class="rpt-hero">'
+            f'<div class="rpt-hero-label">[Executive Summary] 전략적 요약</div>'
+            f'<div class="rpt-hero-kp">'
+            f'<div class="rpt-hero-kp-title">Key Points</div>'
+            f'{kp_items_html}'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

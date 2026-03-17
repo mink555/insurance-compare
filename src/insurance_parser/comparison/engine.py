@@ -79,6 +79,7 @@ class ComparisonResult:
     amount_table: list[dict] = field(default_factory=list)
     coverage_summary: dict = field(default_factory=dict)
     summary: dict = field(default_factory=dict)
+    insight: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -568,7 +569,7 @@ def build_comparison(our_rows: list[dict], comp_rows: list[dict]) -> ComparisonR
         "total": len(match_result.pairs),
     }
 
-    return ComparisonResult(
+    result = ComparisonResult(
         pairs=compared,
         only_our=only_our,
         only_comp=only_comp,
@@ -577,6 +578,8 @@ def build_comparison(our_rows: list[dict], comp_rows: list[dict]) -> ComparisonR
         coverage_summary=coverage_summary,
         summary=summary,
     )
+    result.insight = build_insight_summary(result)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -701,3 +704,240 @@ _DISEASE_LABELS = frozenset({
     "유방전립선암", "갑상선암전립선암",
     "갑상선질환", "여성유방질환", "여성생식기질환",
 })
+
+
+# ---------------------------------------------------------------------------
+# Insight summary (설계사·관리자·상품개발 관점 한줄평 + Key Selling Points)
+# ---------------------------------------------------------------------------
+
+def build_insight_summary(
+    result: ComparisonResult,
+    our_label: str = "당사",
+    comp_label: str = "타사",
+) -> dict:
+    """ComparisonResult에서 순수 규칙 기반 인사이트 요약을 생성한다.
+
+    LLM 호출 없음. 계산된 수치만 문장 템플릿에 삽입 → 할루시네이션 0%.
+
+    반환:
+        headline      — 한줄 포지션 평가 (수치 근거 포함)
+        position      — "우위" | "열위" | "혼재" | "단독보장중심"
+        key_points    — [{"type": str, "label": str, "desc": str, "badges": [str]}]
+                        type: "strength" | "weakness" | "gap" | "condition"
+        score         — {our_adv: int, comp_adv: int, equal: int, matched: int}
+        top_gaps      — 금액 격차 상위 3건 [{name, our_amt, comp_amt, gap_pct, side}]
+        our_only_cats — 당사 단독 보장 카테고리별 집계 {cat: count}
+        comp_only_cats — 타사 단독 보장 카테고리별 집계 {cat: count}
+        cat_score     — 카테고리별 우위 집계 {cat: {우:n, 열:n, 동:n}}
+    """
+    from collections import defaultdict
+
+    matched = result.pairs
+    only_our = result.only_our
+    only_comp = result.only_comp
+
+    our_adv  = [cp for cp in matched if cp.overall_advantage == "당사우위"]
+    comp_adv = [cp for cp in matched if cp.overall_advantage == "타사우위"]
+    cond_diff = [cp for cp in matched if cp.overall_advantage == "조건상이"]
+    equal    = [cp for cp in matched if cp.overall_advantage == "동일"]
+
+    n_matched = len(matched)
+    n_our  = len(our_adv)
+    n_comp = len(comp_adv)
+    our_pct  = n_our  / n_matched * 100 if n_matched else 0
+    comp_pct = n_comp / n_matched * 100 if n_matched else 0
+
+    # ── 포지션 판정 ──────────────────────────────────────────
+    if n_matched == 0:
+        position = "단독보장중심"
+    elif n_our > n_comp and our_pct >= 50:
+        position = "우위"
+    elif n_comp > n_our and comp_pct >= 50:
+        position = "열위"
+    else:
+        position = "혼재"
+
+    # ── 한줄평 ───────────────────────────────────────────────
+    if n_matched == 0:
+        headline = (
+            f"매칭 급부 없음 — "
+            f"{our_label} {len(only_our)}건 단독 / {comp_label} {len(only_comp)}건 단독"
+        )
+    else:
+        pct_str = f"{our_pct:.0f}%"
+        diff_str = ""
+        if only_our:
+            diff_str += f" · {our_label} 단독 {len(only_our)}건"
+        if only_comp:
+            diff_str += f" · {comp_label} 단독 {len(only_comp)}건"
+        headline = (
+            f"매칭 {n_matched}건 중 {our_label}우위 {n_our}건({pct_str}) "
+            f"/ {comp_label}우위 {n_comp}건({comp_pct:.0f}%)"
+            f"{diff_str}"
+        )
+
+    # ── 금액 격차 Top 3 ──────────────────────────────────────
+    gaps: list[dict] = []
+    for cp in matched:
+        if cp.overall_advantage not in ("당사우위", "타사우위"):
+            continue
+        our_v  = _parse_amount_won(cp.our_amount or "")
+        comp_v = _parse_amount_won(cp.comp_amount or "")
+        if not our_v or not comp_v or comp_v == 0:
+            continue
+        gap_pct = (our_v - comp_v) / comp_v * 100
+        gaps.append({
+            "name":     cp.our_name or cp.comp_name,
+            "our_amt":  f"{our_v // 10000:,}만원",
+            "comp_amt": f"{comp_v // 10000:,}만원",
+            "gap_pct":  round(gap_pct),
+            "side":     cp.overall_advantage,  # "당사우위" or "타사우위"
+        })
+    gaps.sort(key=lambda x: abs(x["gap_pct"]), reverse=True)
+    top_gaps = gaps[:3]
+
+    # ── 카테고리별 우위 집계 ──────────────────────────────────
+    cat_score: dict[str, dict] = defaultdict(lambda: {"우": 0, "열": 0, "동": 0})
+    for cp in matched:
+        row = cp.our_row or cp.comp_row or {}
+        cat = row.get("benefit_category_ko") or "기타"
+        if cp.overall_advantage == "당사우위":
+            cat_score[cat]["우"] += 1
+        elif cp.overall_advantage == "타사우위":
+            cat_score[cat]["열"] += 1
+        else:
+            cat_score[cat]["동"] += 1
+
+    # ── 단독 보장 카테고리별 집계 ────────────────────────────
+    def _count_cats(pairs: list[ComparedPair], side: str) -> dict[str, int]:
+        counts: dict[str, int] = defaultdict(int)
+        for cp in pairs:
+            row = (cp.our_row if side == "our" else cp.comp_row) or {}
+            cat = row.get("benefit_category_ko") or "기타"
+            counts[cat] += 1
+        return dict(counts)
+
+    our_only_cats  = _count_cats(only_our,  "our")
+    comp_only_cats = _count_cats(only_comp, "comp")
+
+    # ── 조건 우위 (지급한도 / 감액) ──────────────────────────
+    limit_adv  = []  # payment_limit 당사우위
+    limit_disadv = []  # payment_limit 타사우위
+    reduc_adv  = []  # reduction_rule 당사우위 (감액 없음)
+    reduc_disadv = []  # reduction_rule 타사우위 (당사만 감액)
+
+    for cp in matched:
+        for sc in cp.slot_comparisons:
+            if sc.dimension == "payment_limit":
+                if sc.advantage == "당사우위":
+                    limit_adv.append({"name": cp.our_name, "our": sc.our_value, "comp": sc.comp_value})
+                elif sc.advantage == "타사우위":
+                    limit_disadv.append({"name": cp.our_name, "our": sc.our_value, "comp": sc.comp_value})
+            elif sc.dimension == "reduction_rule":
+                if sc.advantage == "당사우위":
+                    reduc_adv.append({"name": cp.our_name, "our": sc.our_value, "comp": sc.comp_value})
+                elif sc.advantage == "타사우위":
+                    reduc_disadv.append({"name": cp.our_name, "our": sc.our_value, "comp": sc.comp_value})
+
+    # ── Key Points 조립 ──────────────────────────────────────
+    key_points: list[dict] = []
+
+    # 1. 금액 강점
+    if our_adv:
+        top = sorted(
+            [g for g in top_gaps if g["side"] == "당사우위"],
+            key=lambda x: abs(x["gap_pct"]), reverse=True,
+        )
+        if top:
+            best = top[0]
+            badges = [f"{our_label}우위 {n_our}건"]
+            desc = (
+                f"{our_label} {n_our}건에서 금액 우위. "
+                f"최대 격차: {best['name']} ({best['our_amt']} vs {best['comp_amt']}, "
+                f"{best['gap_pct']:+d}%)"
+            )
+        else:
+            badges = [f"{our_label}우위 {n_our}건"]
+            desc = f"매칭 급부 {n_matched}건 중 {n_our}건에서 {our_label} 금액이 높음"
+        key_points.append({"type": "strength", "label": "금액 우위", "desc": desc, "badges": badges})
+
+    # 2. 당사 단독 보장
+    if only_our:
+        cats_str = " · ".join(
+            f"{cat} {cnt}건" for cat, cnt in sorted(our_only_cats.items(), key=lambda x: -x[1])
+        )
+        key_points.append({
+            "type":   "strength",
+            "label":  f"{our_label} 단독 보장",
+            "desc":   f"{comp_label}에 없는 {our_label}만의 급부 {len(only_our)}건 ({cats_str})",
+            "badges": [f"단독 {len(only_our)}건"],
+        })
+
+    # 3. 조건 우위 (지급한도·감액)
+    cond_msgs = []
+    if limit_adv:
+        cond_msgs.append(f"지급한도 {our_label}우위 {len(limit_adv)}건 ({limit_adv[0]['our']} > {limit_adv[0]['comp']})")
+    if reduc_adv:
+        cond_msgs.append(f"감액조건 없음 {our_label}우위 {len(reduc_adv)}건")
+    if cond_msgs:
+        key_points.append({
+            "type":   "strength",
+            "label":  "조건 우위",
+            "desc":   " / ".join(cond_msgs),
+            "badges": ["조건유리"],
+        })
+
+    # 4. 금액 열위
+    if comp_adv:
+        top_w = sorted(
+            [g for g in top_gaps if g["side"] == "타사우위"],
+            key=lambda x: abs(x["gap_pct"]), reverse=True,
+        )
+        badges = [f"{comp_label}우위 {n_comp}건"]
+        if top_w:
+            worst = top_w[0]
+            desc = (
+                f"{comp_label} {n_comp}건에서 금액 우위. "
+                f"최대 격차: {worst['name']} ({worst['comp_amt']} vs {worst['our_amt']}, "
+                f"{-worst['gap_pct']:+d}%)"
+            )
+        else:
+            desc = f"매칭 급부 {n_matched}건 중 {n_comp}건에서 {comp_label} 금액이 높음"
+        key_points.append({"type": "weakness", "label": "금액 열위", "desc": desc, "badges": badges})
+
+    # 5. 조건 열위 (감액 불리)
+    cond_weak = []
+    if limit_disadv:
+        cond_weak.append(f"지급한도 {comp_label}우위 {len(limit_disadv)}건")
+    if reduc_disadv:
+        cond_weak.append(f"감액조건 {comp_label}유리 {len(reduc_disadv)}건 ({reduc_disadv[0]['name']})")
+    if cond_weak:
+        key_points.append({
+            "type":   "weakness",
+            "label":  "조건 열위",
+            "desc":   " / ".join(cond_weak),
+            "badges": ["조건불리"],
+        })
+
+    # 6. 갭 분석 (상품개발용)
+    if only_comp:
+        cats_str = " · ".join(
+            f"{cat} {cnt}건" for cat, cnt in sorted(comp_only_cats.items(), key=lambda x: -x[1])[:4]
+        )
+        key_points.append({
+            "type":  "gap",
+            "label": "보장 갭 (도입 검토)",
+            "desc":  f"{comp_label} 단독 {len(only_comp)}건 미보장 — {cats_str}",
+            "badges": [f"갭 {len(only_comp)}건"],
+        })
+
+    return {
+        "headline":      headline,
+        "position":      position,
+        "key_points":    key_points,
+        "score":         {"our_adv": n_our, "comp_adv": n_comp, "equal": len(equal), "cond_diff": len(cond_diff), "matched": n_matched},
+        "top_gaps":      top_gaps,
+        "our_only_cats": our_only_cats,
+        "comp_only_cats": comp_only_cats,
+        "cat_score":     dict(cat_score),
+    }
