@@ -5,11 +5,9 @@ from .lina_summary_parser import (
 )
 from .hanwha_summary_parser import HanwhaProductSummaryParser
 from .product_bundle_parser import (
-    ProductBundleParser,
     GenericSummaryParser,
     register_summary_parser,
-    make_bundle,
-    parse_bundle,
+    get_or_generic_parser,
 )
 
 __all__ = [
@@ -17,7 +15,6 @@ __all__ = [
     "LinaProductSummaryParser", "LinaMainSummaryParser", "LinaRiderSummaryParser",
     # 한화 전용 파서
     "HanwhaProductSummaryParser",
-    # 범용 번들 파서
-    "ProductBundleParser", "GenericSummaryParser",
-    "register_summary_parser", "make_bundle", "parse_bundle",
+    # 범용 파서 + 레지스트리
+    "GenericSummaryParser", "register_summary_parser", "get_or_generic_parser",
 ]

@@ -1,337 +1,449 @@
----
-title: 라이나 인사이트 - 보험 상품 분석 솔루션
-short_description: 라이나생명 암보험 특약 비교 분석 플랫폼
-emoji: ⚖️
-colorFrom: green
-colorTo: blue
-sdk: docker
-app_port: 7860
----
+# 보험 특약 비교 AI 솔루션
 
-# InsureCompare — 보험 특약 비교 솔루션
-
-타사 보험 상품 PDF 한 장을 올리면 당사 상품과 특약을 자동 비교하고 근거 기반 리포트를 생성함.
+라이나생명 사내 전용 보험 특약 비교 플랫폼. PDF 상품요약서를 자동 파싱하여 당사·타사 특약을 구조화된 데이터로 비교합니다.
 
 ---
 
-## 이런 문제를 해결함
+## 목차
 
-> "갑상선암진단보험금 1,000만원" vs "갑상선의악성진단보험금 1,000만원"  
-> — 같은 보장인데 표기가 달라 비교가 안 되는 문제
-
-보험사마다 같은 보장을 다르게 표기함. 표기 차이를 자동으로 정규화하고 보장 범위·지급 조건·금액을 항목별로 나란히 비교해 우위를 판정함.
+1. [시스템 흐름](#1-시스템-흐름)
+2. [레이어 구조](#2-레이어-구조)
+3. [핵심 로직 상세](#3-핵심-로직-상세)
+   - 3-1. PDF 파싱 (Stage 1)
+   - 3-2. 정규화 (Stage 2)
+   - 3-3. 분류 (Stage 3)
+   - 3-4. Export / Dedup (Stage 4)
+   - 3-5. LLM Enrichment (Stage 5, Optional)
+   - 3-6. 매칭 로직 (canonical\_key)
+   - 3-7. 비교 엔진 (compare\_rules)
+4. [설정 파일 관리 포인트](#4-설정-파일-관리-포인트)
+5. [운영 관리 포인트](#5-운영-관리-포인트)
+6. [로컬 실행](#6-로컬-실행)
+7. [배포](#7-배포)
 
 ---
 
-## 사용 흐름 (비개발자용)
+## 1. 시스템 흐름
+
+### 1-1. 사용자 관점 흐름
 
 ```
-① 파일 업로드
-   타사 보험 상품 PDF를 올림.
-   (당사 상품은 사전 등록되어 있음)
-        │
-        ▼
-② 자동 분석 (내부 처리, 약 10~30초)
-   ┌─────────────────────────────────────────────┐
-   │ 1. 읽기     PDF에서 특약 목록·금액 표 추출   │
-   │ 2. 정규화   금액 단위 통일, 텍스트 정리      │
-   │ 3. 분류     특약을 카테고리별로 묶음         │
-   │ 4. 매칭     당사↔타사 같은 보장 항목 연결    │
-   │ 5. 판정     항목별 우위·동일·조건상이 결정   │
-   └─────────────────────────────────────────────┘
-        │
-        ▼
-③ 리포트 확인
-   [보장범위] 당사에만 있는 항목 / 타사에만 있는 항목
-   [지급조건] 같은 금액이지만 조건이 다른 항목
-   [급부금액] 금액 차이가 있는 항목
-        │
-        ▼
-④ 전략 리포트
-   전략 요약 / 심층 분석 / Evidence 부록
+사용자
+  │
+  ├─ [Step 1: 상품 선택]
+  │    사이드바에서 당사·타사 상품 선택
+  │    새 회사 PDF 업로드 (선택적)
+  │
+  ├─ [Step 2: 비교 분석]
+  │    ① 보장 범위 비교 카드 (질병 분류별 보장 건수)
+  │    ② 지급 조건 비교 카드 (슬롯별 우위 판정)
+  │    ③ 급부별 금액 비교 카드 (전체 급부 금액 나란히)
+  │    → "리포트 생성" 버튼
+  │
+  └─ [Step 3: 리포트]
+       §1 전략적 요약
+       §2 핵심 비교내용 (Evidence [E1], [E2]...)
+       §3 차별점 심층분석
+       §4 특약 상품 개발 제언
+       부록: Evidence 목록
+       [Markdown 다운로드] [CSV 다운로드]
+```
+
+### 1-2. 백엔드 파이프라인 흐름
+
+```
+PDF 업로드
+    │
+    ▼
+[Stage 1: Parse]  ← 회사별 파서 레지스트리 (fallback: GenericSummaryParser)
+    │  출력: raw dict {contracts: [{benefits: [...]}]}
+    │
+    ▼
+[Stage 2: Normalize]  ← 회사/상품 무관 공통 구조로 변환
+    │  출력: CanonicalBenefit[]
+    │  • 급부명 정규화
+    │  • AmountEntry 분리 (복수 금액 조건 처리)
+    │
+    ▼
+[Stage 3: Classify]  ← benefit_category_keywords.json
+    │  출력: CanonicalBenefit[].benefit_category 채움
+    │  • 진단/수술/치료/입원/통원/사망 등
+    │  • other 비율 > 5% 시 WARNING 로그
+    │
+    ▼
+[Stage 4: Export]  ← SummaryRow (flat DataFrame 행)
+    │  출력: SummaryRow[]  →  JSON artifact 저장
+    │  • dedupe_key 생성 (중복 방지)
+    │  • bundle_status 기록 (BOTH/SUMMARY_ONLY/TERMS_ONLY)
+    │
+    ▼
+[Stage 5: Enrich]  ← OPENROUTER_API_KEY 있을 때만 (Optional)
+    │  출력: SummaryRow[].slots 채움
+    │  • trigger / start_condition / payment_freq /
+    │    payment_limit / reduction_rule 슬롯 LLM 추출
+    │  • 실패 시 slots=None, 파이프라인 계속 진행
+    │
+    ▼
+[artifacts/prebuilt_riders.json]  또는  [artifacts/upload_*.json]
+    │
+    ▼
+[비교 분석 요청 시]
+    │
+    ├─ to_comparison_rows()  ← detail rows → 급부별 1행 집약
+    │
+    ├─ match_benefits()  ← canonical_key 기반 당사/타사 급부 매칭
+    │
+    ├─ enrich_rows()  ← 매칭된 쌍만 추가 LLM 슬롯 추출 (Optional)
+    │
+    └─ build_comparison()  ← 규칙 기반 비교 엔진
+         │
+         ├─ coverage_summary  → ① 보장 범위 카드
+         ├─ slot_table        → ② 지급 조건 카드
+         └─ amount_table      → ③ 급부별 금액 카드
 ```
 
 ---
 
-## 우위 판정 기준
+## 2. 레이어 구조
+
+```
+term_test_v2/
+├── app.py                          # Streamlit 진입점 (CSS + 세션 + 라우팅)
+├── views/
+│   └── workbench.py                # 전체 UI (Step1~3)
+│
+├── src/insurance_parser/
+│   ├── parse/                      # Stage 1: PDF 파서
+│   │   ├── lina_summary_parser.py  # 라이나 전용
+│   │   ├── hanwha_summary_parser.py # 한화 전용
+│   │   └── product_bundle_parser.py # 레지스트리 + GenericSummaryParser
+│   │
+│   ├── summary_pipeline/           # Stage 2~4 파이프라인
+│   │   ├── models.py               # 데이터 모델 (DocumentBundle, SummaryRow 등)
+│   │   ├── pipeline.py             # run_pipeline() 오케스트레이터
+│   │   ├── normalizer.py           # Stage2: normalize + export + to_comparison_rows
+│   │   ├── classifier.py           # Stage3: benefit_category 분류
+│   │   ├── detector.py             # 문서 타입 판별
+│   │   └── store.py                # ArtifactStore (JSON 저장/로드)
+│   │
+│   ├── comparison/                 # 비교 엔진
+│   │   ├── normalize.py            # canonical_key + match_benefits
+│   │   ├── enrich.py               # Stage5: LLM 슬롯 추출
+│   │   └── engine.py               # build_comparison() 규칙 엔진
+│   │
+│   ├── report/
+│   │   └── generator.py            # ComparisonReport + SummaryReportBuilder
+│   │
+│   └── llm/
+│       └── openrouter.py           # OpenRouter API 클라이언트
+│
+├── config/
+│   ├── synonyms.json               # canonical_key 동의어 사전 ← 운영 관리 대상
+│   └── compare_rules.json          # 슬롯별 비교 규칙 ← 운영 관리 대상
+│
+├── insurance_info/
+│   └── benefit_category_keywords.json  # Stage3 분류 키워드 ← 운영 관리 대상
+│
+└── artifacts/
+    ├── prebuilt_riders.json        # 사전 파싱된 급부 데이터
+    └── upload_*.json               # 업로드 파싱 결과
+```
+
+---
+
+## 3. 핵심 로직 상세
+
+### 3-1. PDF 파싱 (Stage 1)
+
+**회사별 전용 파서 레지스트리 방식**
+
+```
+register_summary_parser("라이나생명", LinaProductSummaryParser)
+register_summary_parser("한화생명",   HanwhaProductSummaryParser)
+# 새 회사 추가 시 이 한 줄만 추가하면 됨
+```
+
+| 조건 | 동작 |
+|------|------|
+| 전용 파서 등록됨 | 해당 파서로 파싱 |
+| 미등록 | `GenericSummaryParser` (PyMuPDF find_tables fallback) |
+| 파싱 실패 | errors 기록 후 계속 진행 (앱 죽지 않음) |
+
+**`GenericSummaryParser`**: PyMuPDF `find_tables()`로 테이블 구조 추출. 헤더에 "급부/보장/지급" 포함 여부로 급부 테이블 판별. 회사 하드코딩 없음.
+
+---
+
+### 3-2. 정규화 (Stage 2)
+
+**`normalize_summary_data()`** → `CanonicalBenefit[]`
+
+- 회사/상품명 무관한 공통 구조로 변환
+- 한 셀에 여러 금액/조건이 있을 때 `AmountEntry` 분리
+- `amount_detail`: 조건별 금액을 JSON string으로 직렬화
+
+**`to_comparison_rows()`**: detail_rows를 `(benefit_name, insurer)` 기준으로 집약. 복수 AmountEntry가 있는 경우 대표값 + detail 모두 보존.
+
+---
+
+### 3-3. 분류 (Stage 3)
+
+**`benefit_category_keywords.json`** 기반 키워드 매칭
+
+| category | category_ko | 예시 급부 키워드 |
+|----------|-------------|-----------------|
+| diagnosis | 진단 | 진단, 진단자금, 진단금 |
+| surgery | 수술 | 수술, 수술자금, 수술비 |
+| treatment | 치료 | 치료, 항암, 방사선 |
+| hospitalization | 입원 | 입원, 직접치료입원 |
+| outpatient | 통원 | 통원, 외래 |
+| death | 사망 | 사망, 사망보험금 |
+| other | 기타 | 미분류 |
+
+**운영 포인트**: `other` 비율이 5% 초과 시 자동 WARNING 로그 출력 + 미분류 급부명 목록 기록. 로그 확인 후 `benefit_category_keywords.json`에 키워드 추가.
+
+---
+
+### 3-4. Export / Dedup (Stage 4)
+
+**`dedupe_key`**: `(insurer, product_name, contract_name, benefit_name, amount)` 해시. 동일 파일 재업로드 시 중복 방지.
+
+**`ArtifactStore`**:
+- `save_upload()`: file_hash 기반 중복 저장 방지
+- `load_all()`: prebuilt + uploads 합산 → dedupe_key 기준 최종 dedup
+- 구 포맷(v1.0 배열) / 신 포맷(v1.1 `{_meta, rows}`) 모두 지원
+
+---
+
+### 3-5. LLM Enrichment (Stage 5, Optional)
+
+**조건**: `OPENROUTER_API_KEY` 환경변수 설정 시에만 실행.
+
+**추출 슬롯**:
+| 슬롯 | 설명 | 예시 |
+|------|------|------|
+| trigger | 보험금 지급 사유 | "암 진단확정" |
+| start_condition | 보장 개시 조건 | "암보장개시일 이후" |
+| payment_freq | 지급 횟수/주기 | "매년 1회" |
+| payment_limit | 지급 한도 | "최대 5년" |
+| reduction_rule | 감액 규칙 | "1년 이내 50%" |
+
+**Graceful degradation**: API 키 없음 → slots=None, 비교 시 fallback 필드 사용. LLM 응답 파싱 실패 → 해당 행만 slots=None.
+
+**비교 시 슬롯 우선순위**: `slots.payment_limit` > `coverage_limit` raw 필드
+
+---
+
+### 3-6. 매칭 로직 (`canonical_key`)
+
+**핵심 원칙**: 급부명의 의미 슬롯만 추출하여 회사 간 명명 차이를 흡수.
+
+```
+급부명 → normalize_text()  → type suffix 제거 → 슬롯 추출 → 키 생성
+                                                 condition | disease | action
+```
+
+**슬롯 추출 방식**: `synonyms.json` 역방향 맵 기반 **Longest-match**
+
+| 슬롯 | 내용 | 예시 |
+|------|------|------|
+| condition | 지급 채널/장소/특수조건 | 비급여, 상급종합병원, 초기이외, Ⅱ차 |
+| disease | 질병 분류 | 일반암, 갑상선암, 기타피부암갑상선암복합 |
+| action | 급부 유형 | 진단, 수술, 항암약물, 입원, 통원 |
+
+**복합 disease 처리**:
+
+`기타피부암·갑상선암 주요치료자금` → disease 슬롯에서 `기타피부암갑상선암복합` (길이=11) > `기타피부암` (길이=5) → **longest-match로 복합 레이블 선택**
+
+**coverage_summary 복합 카운팅**:
+
+`_COMPOSITE_DISEASE_MAP`으로 복합 레이블을 개별 질병으로 확장:
+- `기타피부암갑상선암복합` → `["기타피부암", "갑상선암"]` 각각 카운트
+
+**`category_ko` fallback**:
+
+급부명만으로 action 슬롯 추출 불가 시 (`canonical_key("갑상선암", "진단")`) → `_CATEGORY_KO_TO_ACTION["진단"] = "진단"` 사용 → `갑상선암|진단`
+
+**1:N 매칭 처리**: 같은 canonical_key에 여러 급부가 있을 때 금액 유사도(문자 집합 겹침 비율)로 Greedy 매칭.
+
+---
+
+### 3-7. 비교 엔진 (`compare_rules`)
+
+**금액 비교 (`_compare_amounts`)**:
 
 | 상황 | 판정 |
 |------|------|
-| 금액·조건 모두 같음 | 동일 |
-| 금액이 다름 | 높은 쪽 우위 (조건부 금액은 최대값 기준으로 비교) |
-| 금액 같고 한쪽만 조건부 | 조건 없는 쪽 우위 |
-| 금액 같고 둘 다 조건부·조건 다름 | 조건상이 |
-| 한쪽에만 존재 | 당사단독 / 타사단독 |
+| 금액 다름 | 높은 쪽 우위 |
+| 금액 같음, 한쪽만 조건부 | 조건 없는 쪽 우위 |
+| 금액 같음, 둘 다 조건부, 조건 다름 | 조건상이 |
+| 금액 같음, 둘 다 비조건부 또는 동일 조건 | 동일 |
 
-> 조건부 금액(감액기간 등)이 있어도 최대값 기준으로 먼저 비교함.  
-> 예) 라이나 3,000만원 vs 한화 1년미만 500만원/1년이상 1,000만원 → 3,000 vs 1,000 → **당사우위**
+**대표값 원칙**: `amount_detail`이 있으면 **최대값**을 대표값으로 사용. "상대방이 가장 유리한 조건에서도 우리가 이기는가"를 판단 기준으로 삼음.
 
----
+**슬롯 비교 (`compare_rules.json`)**:
 
-## 핵심 개념: 두 개의 사전
+| 슬롯 | type | 근거 |
+|------|------|------|
+| amount_display | numeric | 금액은 숫자 직접 비교 |
+| payment_limit | limit_numeric | "최대 5년" vs "최대 10년": 단위 같을 때만 숫자 비교, 높을수록 유리 |
+| reduction_rule | none_is_better | 감액 조건 없을수록 유리, 있으면 비교불가 |
+| payment_freq | display_only | 지급 주기는 방향 없음, 표시만 |
+| start_condition | display_only | 보장 개시 조건은 자유 텍스트, 표시만 |
+| trigger | display_only | 지급 사유는 자유 텍스트, 표시만 |
 
-역할이 다른 사전 파일이 두 개 있음.
+**`limit_numeric` 단위 키**:
+- `"최대 5년"` → `("년", 5)`
+- `"최초 1회"` → `("최초_회", 1)` ← "최초"와 "연간"은 의미 달라 다른 단위
+- `"연간 1회"` → `("연간_회", 1)`
+- 단위 다른 경우 → `비교불가`
 
-| 사전 | 파일 | 질문 | 사용 위치 |
-|------|------|------|----------|
-| 동의어 사전 | `config/synonyms.json` | "이 두 급부명이 같은 보장인가?" | `comparison/normalize.py` — 당사↔타사 매칭 |
-| 카테고리 사전 | `insurance_info/benefit_category_keywords.json` | "이 급부는 진단/수술/치료 중 무엇인가?" | `summary_pipeline/classifier.py` — PDF 파싱 후 분류 |
-
-둘을 합치면 역할이 뒤섞임. "항암치료"라는 키워드가 매칭 키인지 분류 키인지 알 수 없게 되고, 한쪽 수정 시 다른 쪽 동작이 깨질 수 있음.
-
----
-
-### 동의어 사전 (`synonyms.json`)
-
-**목적**: 보험사마다 다른 표기를 같은 키로 묶어 매칭함.
-
-```
-라이나생명: "갑상선암진단보험금"
-한화생명:   "갑상선의악성진단보험금"
-         → 둘 다 canonical key: "갑상선암|진단" → 매칭 성공
-```
-
-**생성 방법**: 아래 3개 도메인 파일을 LLM에 제공해 동의어 관계를 분류하고 생성함. 자동 파싱 스크립트가 아니라 LLM이 내용을 읽고 직접 작성한 정적 JSON임.
-
-| 파일 | 역할 |
-|------|------|
-| `insurance_info/kcd9_cancer_codes.json` | 질병 분류 근거 — C44=기타피부암, C73=갑상선암, D00-D09=제자리암 등 KCD 코드 매핑 |
-| `insurance_info/2026년_생명보험표준약관.txt` | 행위 분류 근거 — 수술·치료·검사의 법적 정의 |
-| `insurance_info/보험_리서치.txt` | 암 분류 체계 — 일반암/소액암/유사암 구분 기준 |
-
-**왜 AI(RAG) 매칭이 아닌가?**  
-암보험 특약명은 표준약관과 KCD 코드가 나올 수 있는 표현을 규정하는 **닫힌 도메인**임.  
-AI 유사도 매칭은 "남성난임"과 "남성특화암"처럼 유사하지만 **다른 보장을 같은 항목으로 오인**할 수 있음.  
-정적 사전은 결과가 항상 일정하고, 오류 발생 시 원인을 즉시 파악할 수 있음.
+**`조건상이` LLM 재판정**: `resolve_mixed_pairs()` — API 키 있을 때 소비자 관점에서 당사우위/타사우위/대등 재판정.
 
 ---
 
-### 카테고리 사전 (`benefit_category_keywords.json`)
+## 4. 설정 파일 관리 포인트
 
-**목적**: PDF에서 추출한 급부를 보험 종류별 카테고리로 분류함.
+### `config/synonyms.json`
 
+급부 매칭의 핵심 사전. **코드 수정 없이** 이 파일만 편집하면 새 용어 인식 가능.
+
+```json
+{
+  "action": {
+    "수술": ["수술"],
+    "관혈수술": ["관혈수술"],          // 개복/관혈 수술 — 별도 canonical
+    "내시경수술": ["내시경수술"],       // 내시경 — 별도 canonical
+    "항암약물": ["항암약물", "항암화학", ...]
+  },
+  "disease": {
+    "일반암": ["암"],
+    "갑상선암": ["갑상선암", "갑상선의악성", "갑상선"],
+    "기타피부암갑상선암복합": [         // 복합 급부 — disease 슬롯에 있어야 longest-match 동작
+      "기타피부암갑상선암",
+      "기타피부암∙갑상선암", ...
+    ]
+  },
+  "condition": {
+    "비급여": ["비급여", "전액본인부담포함"],
+    "상급종합병원": ["상급종합병원"],
+    "Ⅱ차": ["Ⅱ"]                      // 특약 2차 버전 구분
+  }
+}
 ```
-"암 진단확정" → diagnosis (진단)
-"항암방사선치료" → treatment (치료)
-"입원일당" → hospitalization (입원)
-```
 
-보험 종류별(암/치매/치아/뇌심장) 전용 키워드 섹션을 먼저 검색하고, 없으면 `default`로 fallback함.  
-새 보험 종류 추가 시 **이 파일에 섹션만 추가하면 되며, 코드 수정 불필요함.**
+**추가 시 주의**:
+- **Longest-match**로 동작하므로 구체적인 변형일수록 variant를 길게 작성
+- 복합 disease는 반드시 `disease` 슬롯에 추가 (condition 아님)
+- 동의어 추가 후 앱 재시작 시 자동 리로드 (파일 변경만으로 적용)
 
-**생성 방법**: `synonyms.json`과 같은 시기에, 같은 방식(도메인 3개 파일 + LLM 수동 작성)으로 만들어짐.
+### `config/compare_rules.json`
+
+슬롯별 비교 방향 설정. 새 슬롯 추가 시 여기에도 등록 필요.
+
+| type | 사용 시 |
+|------|---------|
+| `numeric` | 금액 숫자 직접 비교 |
+| `limit_numeric` | "최대 N년/회" 패턴 수치 비교 |
+| `none_is_better` | 없는 쪽이 유리 (감액, 면책 등) |
+| `display_only` | 비교 방향 없음, 표시만 |
+| `rank` | 순위 리스트 기반 비교 |
+
+### `insurance_info/benefit_category_keywords.json`
+
+Stage3 분류 키워드. 새 보험 종류 추가 시 미분류 급부가 발생하면 여기에 키워드 추가.
 
 ---
 
-## 실행
+## 5. 운영 관리 포인트
+
+### 정기 점검 항목
+
+| 항목 | 확인 방법 | 조치 |
+|------|----------|------|
+| `other` 비율 | 업로드 후 Streamlit 로그 | `benefit_category_keywords.json` 키워드 추가 |
+| 매칭 누락 | Step2 "당사단독/타사단독" 건수 비정상 증가 | `synonyms.json` 변형 추가 |
+| 과집약 | 다른 의미의 급부가 같은 key로 매칭 | `synonyms.json`에서 별도 canonical 분리 |
+| 금액 비교 오류 | `조건상이` 건수 과다 | `compare_rules.json` 또는 `_parse_limit` 로직 점검 |
+
+### 신규 보험사 추가 절차
+
+```
+1. lina_summary_parser.py를 참고하여 new_parser.py 작성
+2. parse/__init__.py에서 register_summary_parser() 호출 추가
+3. 상품요약서 PDF 업로드 → 파싱 결과 확인
+4. canonical_key 생성 결과 검토 (오탐/누락 확인)
+5. synonyms.json에 신규 용어 추가
+6. artifacts/prebuilt_riders.json 갱신 (스크립트: scripts/parse_linalife_summaries.py 참고)
+```
+
+### `artifacts/prebuilt_riders.json` 갱신
+
+사전 파싱된 데이터. 신규 상품 추가 또는 데이터 정정 시 재생성.
 
 ```bash
+# 예시: 라이나 전체 상품 재파싱
+python scripts/parse_linalife_summaries.py
+```
+
+### LLM 비용 관리
+
+| 시점 | 설명 | 제어 |
+|------|------|------|
+| 업로드 직후 | 전체 급부 enrichment | `OPENROUTER_API_KEY` 미설정 시 스킵 |
+| 비교 분석 시 | 매칭된 쌍만 추가 enrichment | 세션 캐시(`wb_slots_cache`)로 중복 호출 방지 |
+| 조건상이 재판정 | `resolve_mixed_pairs()` | 조건상이 건수가 0이면 호출 없음 |
+
+---
+
+## 6. 로컬 실행
+
+```bash
+# 의존성 설치
 pip install -r requirements.txt
-cp .env.example .env   # OPENROUTER_API_KEY 입력
+
+# 환경변수 설정 (선택: LLM enrichment 사용 시)
+cp .env.example .env
+# OPENROUTER_API_KEY=sk-or-...
+
+# 실행
 streamlit run app.py
 ```
 
-| 환경변수 | 설명 | 필수 |
-|---------|------|:---:|
-| `OPENROUTER_API_KEY` | OpenRouter API 키 | ✅ |
-| `OPENROUTER_MODEL` | LLM 모델 (기본: `qwen/qwen3-235b-a22b`) | |
-| `ENABLE_RAG` | 도메인 RAG 활성화 (기본: `true`) | |
+---
+
+## 7. 배포
+
+### Hugging Face Spaces
+
+```bash
+git push github main   # GitHub push
+git push hf main       # HF Spaces 자동 빌드 트리거
+```
+
+**빌드 후 반영 시간**: 통상 1~3분.
+
+**환경변수 설정** (HF Spaces → Settings → Repository secrets):
+- `OPENROUTER_API_KEY` — LLM enrichment 활성화 시 필수
+- `ARTIFACT_DIR` — artifact 저장 경로 (기본값: `./artifacts`)
 
 ---
 
-## 신규 회사/상품 추가
+## 아키텍처 판단 근거
 
-```
-1. 파서 작성        src/insurance_parser/parse/ 에 새 파서 추가
-        │
-2. 레지스트리 등록  product_bundle_parser.py 의 _PARSERS 에 추가
-        │
-3. 동의어 등록      config/synonyms.json 에 새 표기 추가
-        │
-4. 카테고리 추가    신규 보험 종류면 benefit_category_keywords.json 에 섹션 추가
-                   (코드 수정 불필요)
-```
+### "왜 RAG가 아닌 정적 사전(synonyms.json)인가?"
 
----
+| 비교 항목 | RAG | 정적 사전 |
+|----------|-----|---------|
+| 재현성 | 매번 다를 수 있음 | 항상 동일 |
+| 속도 | 임베딩 + 검색 필요 | O(1) 해시맵 |
+| 관리 비용 | 인덱스 갱신 필요 | 파일 한 줄 추가 |
+| 도메인 정확도 | 일반 LLM 기준 | 보험 도메인 특화 |
+| 오류 추적 | 어려움 | canonical_key 로그로 즉시 확인 |
 
-## 분류 파이프라인 설계 로직
+보험 도메인의 급부명은 **정형화된 패턴**이 있고, 이미 알려진 용어 집합이 유한합니다. 신규 용어는 synonyms.json 한 줄 추가로 즉시 반영됩니다.
 
-### 원칙
+### "왜 LLM 없이 규칙 기반 비교인가?"
 
-> **사전은 항상 불완전하다. 불완전함을 빠르게 감지하고, 보완 비용을 최소화한다.**
+비교 판정은 **재현성**이 중요합니다. 동일 데이터를 비교했을 때 항상 같은 결과가 나와야 합니다. LLM은 슬롯 추출(비정형 텍스트 → 구조화) 단계에서만 사용하고, 판정 자체는 `compare_rules.json`의 규칙으로 처리합니다.
 
-### 파이프라인 흐름
-
-```
-[Stage 1] parse       PDF → {benefit_name, trigger, amounts}
-              ↓
-[Stage 2] normalize   회사별 raw dict → CanonicalBenefit 공통 구조
-              ↓
-[Stage 3] classify    benefit_name 우선 → trigger 보조 → 카테고리 분류
-              ↓
-[Stage 3 검증]        other 비율 측정 → 5% 초과 시 WARNING + 미분류 목록 출력
-              ↓
-[Stage 4] export      CanonicalBenefit → SummaryRow (비교 테이블 행)
-```
-
-### 카테고리 분류 매칭 전략 (2단계)
-
-```
-1단계: benefit_name만으로 매칭
-       → 카테고리 식별 정보가 benefit_name에 집약되어 있기 때문
-       → 예: "암 주요검사비용지원금" → examination (검사)
-
-2단계: benefit_name 매칭 실패 시 (benefit_name + trigger) 전체로 재시도
-       → trigger는 판박이 문장이 많아 오탐 가능성이 있으므로 보조 수단으로만 사용
-```
-
-**왜 benefit_name만 먼저 보나?**  
-trigger는 대부분 "보험기간 중 피보험자가 암보장개시일 이후에 '암'으로 진단이 확정되고..." 같은 반복 문장임. 이를 먼저 보면 진단/치료/검사 등 서로 다른 급부가 같은 키워드("진단", "확정")에 걸려 오분류될 수 있음.
-
-### other 비율과 재발 방지
-
-분류에 실패한 급부는 `other`(기타)로 기록됨. **이 비율이 높아지는 것이 사전 보완이 필요하다는 신호임.**
-
-파이프라인은 Stage3 완료 후 자동으로 other 비율을 측정하고 5% 초과 시 로그에 WARNING을 남김.
-
-```
-[Stage3/classify] ⚠️ other 비율 10.8% > 5%
-미분류 급부명: ['암 주요검사비용지원금', '급여 PET검사비용', ...]
-```
-
----
-
-## 운영 로직
-
-### 새 상품 추가 후 필수 절차
-
-```
-1. 상품 파싱 (파이프라인 실행)
-        ↓
-2. 분류 검증 스크립트 실행
-   python scripts/validate_categories.py
-        ↓
-3. other 비율 확인
-   ├─ 5% 이하 → 완료
-   └─ 5% 초과 → 미분류 급부명 목록 확인
-                → benefit_category_keywords.json 해당 섹션에 키워드 추가
-                → 검증 스크립트 재실행 → 5% 이하 확인
-```
-
-### 문제 발생 시 원인 찾기
-
-| 증상 | 원인 | 수정 위치 |
-|------|------|----------|
-| 같은 보장인데 "단독" 판정 | 동의어 누락 | `config/synonyms.json` |
-| 금액 같은데 "우위" 판정 | 금액 파싱 오류 | 해당 회사 파서 |
-| 새 상품 특약이 전부 "기타" 분류 | 카테고리 키워드 미등록 | `benefit_category_keywords.json` |
-| 다른 보장이 같은 항목으로 매칭 | 동의어 과도 등록 | `config/synonyms.json` |
-| 로그에 other 비율 경고 | 신규 급부 유형 사전 미등록 | `benefit_category_keywords.json` |
-
-### `benefit_category_keywords.json` 키워드 추가 방법
-
-새 급부가 `other`로 분류될 때 추가한다.
-
-```
-1. validate_categories.py 실행 → 미분류 급부명 확인
-2. 해당 급부가 어느 카테고리인지 판단
-   (판단 기준: 급부명 자체 + 표준약관 정의)
-3. 해당 보험 종류 섹션에 키워드 추가
-   - 기존 카테고리에 속하면: keywords 배열에 추가
-   - 새 카테고리면: 섹션 자체를 추가 (코드 수정 불필요)
-4. validate_categories.py 재실행 → 5% 이하 확인
-```
-
-**판단이 애매한 케이스 처리 원칙**
-
-| 케이스 | 처리 |
-|--------|------|
-| 보험 종류 자체가 다른 급부 (예: 난임) | 파서 필터링 대상 — 사전 추가 금지 |
-| trigger가 비어있어 매칭 불가 | 파서 품질 문제 — 파서 수정 |
-| 새 유형의 진단/치료 (예: 신의료기술) | 가장 가까운 카테고리에 추가 |
-
-### `synonyms.json` 업데이트 시점
-
-**새 상품 파싱 후 매칭 누락 발견 시**
-```
-매칭 안 된 특약명 확인
-  → kcd9_cancer_codes.json 또는 표준약관에서 어느 분류인지 확인
-  → synonyms.json 해당 항목의 표기 목록에 추가
-```
-
-**KCD 코드 개정 시** (대개정 5~10년, 소개정 수시)
-```
-kcd9_cancer_codes.json 업데이트
-  → 질병 분류가 바뀐 항목만 synonyms.json 반영
-  → 행위(수술·치료·검사) 카테고리는 KCD와 무관하므로 건드리지 않음
-```
-
-**표준약관 개정 시** (금융위 고시, 연 1~2회)
-```
-2026년_생명보험표준약관.txt 최신본으로 교체
-  → 새로 편입된 치료법·행위 용어를 synonyms.json action 항목에 추가
-  → 질병(disease) 카테고리는 KCD 기준이므로 여기서 건드리지 않음
-```
-
-**수정 후 아래 케이스가 정상인지 반드시 확인**
-```
-남성난임  ≠  남성특화암    ← 다른 보장이 같은 키로 묶이면 안 됨
-재건수술  ≠  수술          ← 다른 보장이 같은 키로 묶이면 안 됨
-갑상선의악성  →  갑상선암  ← 표기만 다른 같은 보장은 같은 키로 묶여야 함
-```
-
----
-
-## 프로젝트 구조 (개발자용)
-
-```
-app.py                          Streamlit 진입점
-views/workbench.py              3단계 UI 렌더링
-
-src/insurance_parser/
-  parse/
-    utils.py                    파서 공통 유틸
-    lina_summary_parser.py      라이나생명 PDF 파서
-    hanwha_summary_parser.py    한화생명 PDF 파서
-    product_bundle_parser.py    파서 레지스트리
-  summary_pipeline/
-    pipeline.py                 파이프라인 오케스트레이터
-    normalizer.py               정규화 + comparison_rows 변환
-    classifier.py               급부 카테고리 분류
-    store.py                    ArtifactStore (JSON 저장/로드)
-  comparison/
-    normalize.py                급부 매칭 (canonical_key)
-    engine.py                   규칙 기반 우위 판정
-    enrich.py                   LLM 슬롯 추출 (조건상이 항목)
-  llm/
-    openrouter.py               OpenRouter 클라이언트
-    rag.py                      ChromaDB 도메인 RAG
-  report/
-    generator.py                리포트 생성 + Evidence 수집
-
-scripts/
-  validate_categories.py         분류 검증 (other 비율 측정, 미분류 목록 출력)
-  parse_linalife_summaries.py     라이나생명 상품 일괄 파싱
-
-config/
-  synonyms.json                 급부명 동의어 사전
-  compare_rules.json            슬롯별 비교 규칙
-
-insurance_info/
-  kcd9_cancer_codes.json          KCD9 암 코드 (C00-C97, D00-D48) — synonyms.json 생성 근거
-  benefit_category_keywords.json  급부 카테고리 키워드 (보험 종류별 진단/수술/치료/입원 분류)
-  2026년_생명보험표준약관.txt       생명보험 표준약관 (2025.3.31 기준) — synonyms.json 생성 근거
-  보험_리서치.txt                  암 분류 체계 리서치 (일반암/소액암/유사암) — synonyms.json 생성 근거
-```
-
----
-
-## 기술 스택
-
-| 역할 | 기술 |
-|------|------|
-| PDF 추출 | PyMuPDF |
-| LLM | OpenRouter → Qwen3-235B |
-| 벡터 DB | ChromaDB |
-| UI | Streamlit |
-| 배포 | Docker (Hugging Face Spaces) |
+LLM은 판정이 애매한 `조건상이` 케이스에 대해서만 **후처리로** 우위 판정에 관여합니다 (`resolve_mixed_pairs`).

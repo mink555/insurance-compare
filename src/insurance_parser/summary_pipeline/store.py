@@ -186,16 +186,6 @@ class ArtifactStore:
                 logger.warning("업로드 파일 로드 실패 %s: %s", path, e)
         return all_rows
 
-    def list_upload_metas(self) -> list[dict]:
-        """업로드된 artifact의 메타정보 목록 (UI 표시용)."""
-        metas: list[dict] = []
-        for path in sorted(self.base_dir.glob(f"{_UPLOAD_PREFIX}*.json")):
-            m = self._read_meta(path)
-            if m:
-                m["_file"] = path.name
-                metas.append(m)
-        return metas
-
     def load_all(self) -> list[dict]:
         """prebuilt + uploads 전체 로드. dedupe_key 기준 최종 중복 행 제거."""
         prebuilt = self.load_prebuilt()
@@ -207,7 +197,6 @@ class ArtifactStore:
             len(prebuilt), len(uploads), len(combined),
         )
 
-        # ── [최종 dedupe] dedupe_key 기준 중복 행 제거 ──
         # dedupe_key가 없는 구 포맷 row는 normalizer.make_dedupe_key로 즉시 생성
         from .normalizer import make_dedupe_key
         seen: set[str] = set()
@@ -231,17 +220,3 @@ class ArtifactStore:
             logger.info("[ArtifactStore/load_all] 최종 DataFrame: %d행 (중복 없음)", after)
 
         return deduped
-
-    def list_companies(self) -> list[str]:
-        rows = self.load_all()
-        seen: set[str] = set()
-        result: list[str] = []
-        for r in rows:
-            c = r.get("insurer", "")
-            if c and c not in seen:
-                seen.add(c)
-                result.append(c)
-        return result
-
-    def get_by_company(self, company_name: str) -> list[dict]:
-        return [r for r in self.load_all() if r.get("insurer") == company_name]

@@ -4,10 +4,8 @@
 모델 실패 시 자동 fallback chain을 지원한다.
 
 환경변수:
-  OPENROUTER_API_KEY           — 필수
-  OPENROUTER_MODEL             — 선택 (기본: qwen/qwen3-235b-a22b)
-  OPENROUTER_EMBEDDING_MODEL   — 선택 (기본: intfloat/multilingual-e5-large)
-  ENABLE_RAG                   — 선택 (기본: true)
+  OPENROUTER_API_KEY  — 필수
+  OPENROUTER_MODEL    — 선택 (기본: qwen/qwen3-235b-a22b)
 """
 from __future__ import annotations
 
@@ -23,14 +21,12 @@ load_dotenv()
 log = logging.getLogger(__name__)
 
 CHAT_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-EMBEDDING_API_URL = "https://openrouter.ai/api/v1/embeddings"
 
 DEFAULT_MODEL = "qwen/qwen3-235b-a22b"
 FALLBACK_MODELS = [
     "google/gemma-3-27b-it",
     "qwen/qwen3-30b-a3b",
 ]
-DEFAULT_EMBEDDING_MODEL = "intfloat/multilingual-e5-large"
 
 
 @dataclass
@@ -39,13 +35,6 @@ class LLMResponse:
     model: str
     usage: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict)
-
-
-@dataclass
-class EmbeddingResponse:
-    embeddings: list[list[float]]
-    model: str
-    usage: dict = field(default_factory=dict)
 
 
 def _get_api_key() -> str:
@@ -60,14 +49,6 @@ def _get_api_key() -> str:
 
 def _get_model() -> str:
     return os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)
-
-
-def _get_embedding_model() -> str:
-    return os.environ.get("OPENROUTER_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
-
-
-def is_rag_enabled() -> bool:
-    return os.environ.get("ENABLE_RAG", "false").lower() in ("true", "1", "yes")
 
 
 def _headers() -> dict:
@@ -134,34 +115,4 @@ def generate(
     raise RuntimeError(
         f"모든 모델이 실패했습니다: {[primary] + FALLBACK_MODELS}. "
         f"마지막 오류: {last_error}"
-    )
-
-
-def embed(
-    texts: list[str],
-    *,
-    model: str | None = None,
-) -> EmbeddingResponse:
-    """OpenRouter를 통해 텍스트 임베딩을 생성한다."""
-    model = model or _get_embedding_model()
-
-    payload = {
-        "model": model,
-        "input": texts,
-    }
-
-    log.info("OpenRouter embedding: model=%s, texts=%d", model, len(texts))
-
-    resp = requests.post(
-        EMBEDDING_API_URL, headers=_headers(), json=payload, timeout=60,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-
-    embeddings = [item["embedding"] for item in data.get("data", [])]
-
-    return EmbeddingResponse(
-        embeddings=embeddings,
-        model=data.get("model", model),
-        usage=data.get("usage", {}),
     )

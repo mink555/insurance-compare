@@ -46,13 +46,6 @@ def _load_synonyms() -> dict[str, dict[str, list[str]]]:
     return _synonyms_cache
 
 
-def reload_synonyms() -> None:
-    """Force reload synonyms.json (e.g. after editing config)."""
-    global _synonyms_cache
-    _synonyms_cache = None
-    _load_synonyms()
-
-
 # ---------------------------------------------------------------------------
 # Build reverse lookup: variant → canonical label (per slot category)
 # ---------------------------------------------------------------------------
