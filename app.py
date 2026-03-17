@@ -398,6 +398,16 @@ div[data-testid="stTabPanel"] div[data-testid="stVerticalBlock"] { gap: var(--sp
 .rpt-card-badge { margin-left: auto; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--r-full); background: var(--g1); color: var(--g5); }
 .rpt-sub { font-size: 13px; font-weight: 600; color: var(--teal-700); margin: var(--sp-3) 0 var(--sp-2); padding-left: var(--sp-3); border-left: 3px solid var(--teal-400); }
 .ev-appendix { background: var(--w); border: 1px solid var(--g2); border-radius: var(--r-lg); padding: var(--sp-5); margin-top: var(--sp-2); box-shadow: var(--shadow-1); }
+.ev-card { background: var(--g0); border: 1px solid var(--g2); border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-2); }
+.ev-card-hdr { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.ev-card-id { font-size: 11px; font-weight: 700; color: var(--teal-600); background: var(--teal-50); border: 1px solid var(--teal-200); padding: 2px 7px; border-radius: var(--r-full); flex-shrink: 0; }
+.ev-card-side { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: var(--r-full); flex-shrink: 0; }
+.ev-card-side-our  { background: var(--teal-50); color: var(--teal-700); }
+.ev-card-side-comp { background: var(--comp-100); color: var(--comp-700); }
+.ev-card-benefit { font-size: 13px; font-weight: 600; color: var(--g8); }
+.ev-card-contract { font-size: 11px; color: var(--g4); margin-left: auto; }
+.ev-card-field { display: inline-block; font-size: 11px; color: var(--g5); background: var(--g1); padding: 1px 6px; border-radius: var(--r-full); margin-bottom: var(--sp-2); }
+.ev-card-text { font-size: 12px; color: var(--g7); line-height: 1.7; white-space: pre-wrap; word-break: keep-all; background: var(--w); border: 1px solid var(--g2); border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-3); }
 
 /* ══════════════════════════════════════════════
    K. HERO (report strategic summary)

@@ -1339,7 +1339,7 @@ def _render_rpt_evidence(report) -> None:
         f'<div class="card-badge">{len(evidences)}건</div>'
         f'</div>'
         f'<div class="detail-meta">'
-        f'리포트 내 <span class="eid">[E1]</span> 형태의 태그에 마우스를 올리시면 약관 원문을 확인하실 수 있습니다.'
+        f'리포트 내 <span class="eid">[E1]</span> 형태의 태그에 마우스를 올리시면 약관 원문을 미리 볼 수 있습니다.'
         f'</div></div>',
         unsafe_allow_html=True,
     )
@@ -1347,32 +1347,29 @@ def _render_rpt_evidence(report) -> None:
     our_evs = [ev for ev in evidences if ev.side == "당사"]
     comp_evs = [ev for ev in evidences if ev.side != "당사"]
 
-    def _ev_group(title: str, evs: list):
+    def _ev_group(title: str, evs: list, side_cls: str):
         if not evs:
             return
         with st.expander(f"{title} ({len(evs)}건)", expanded=False):
-            ev_rows = []
+            cards_html = []
             for ev in evs:
-                ev_rows.append(
-                    f'<tr>'
-                    f'<td><span class="eid">[{ev.id}]</span></td>'
-                    f'<td class="row-label">{ev.benefit}</td>'
-                    f'<td class="text-muted">{ev.field}</td>'
-                    f'<td><div class="cell-clamp-3">{ev.text}</div></td>'
-                    f'</tr>'
+                contract_html = f'<span class="ev-card-contract">{ev.contract}</span>' if ev.contract else ''
+                cards_html.append(
+                    f'<div class="ev-card">'
+                    f'<div class="ev-card-hdr">'
+                    f'<span class="ev-card-id">[{ev.id}]</span>'
+                    f'<span class="ev-card-side {side_cls}">{ev.side}</span>'
+                    f'<span class="ev-card-benefit">{ev.benefit}</span>'
+                    f'{contract_html}'
+                    f'</div>'
+                    f'<span class="ev-card-field">{ev.field}</span>'
+                    f'<div class="ev-card-text">{ev.text}</div>'
+                    f'</div>'
                 )
-            st.markdown(
-                f'<table class="tbl"><colgroup><col style="width:50px"><col style="width:25%"><col style="width:15%"><col></colgroup>'
-                f'<thead><tr><th>ID</th>'
-                f'<th>급부</th>'
-                f'<th>필드</th>'
-                f'<th>약관 원문</th></tr></thead>'
-                f'<tbody>{"".join(ev_rows)}</tbody></table>',
-                unsafe_allow_html=True,
-            )
+            st.markdown("".join(cards_html), unsafe_allow_html=True)
 
-    _ev_group("당사 Evidence", our_evs)
-    _ev_group("타사 Evidence", comp_evs)
+    _ev_group("당사 Evidence", our_evs, "ev-card-side-our")
+    _ev_group("타사 Evidence", comp_evs, "ev-card-side-comp")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
