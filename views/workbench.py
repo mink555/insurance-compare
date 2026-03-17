@@ -92,12 +92,13 @@ def _status_html(status: str) -> str:
         "동일":    '<span class="status-both-same">동일</span>',
         "금액상이": '<span class="status-both-diff">금액상이</span>',
         "조건상이": '<span class="status-both-diff">조건상이</span>',
-        "상이":    '<span class="status-both-diff">상이</span>',
         "당사우위": '<span class="status-only-our">당사우위</span>',
         "타사우위": '<span class="status-only-comp">타사우위</span>',
         "당사단독": '<span class="status-only-our">당사단독</span>',
         "타사단독": '<span class="status-only-comp">타사단독</span>',
         "비교불가": '<span class="status-unknown">비교불가</span>',
+        "표시":    "",  # display_only 불일치: 배지 없음, 값만 나란히 표시
+        "상이":    "",  # 하위 호환: 표시와 동일하게 배지 없음
     }
     return mapping.get(status, f'<span class="status-unknown">{status}</span>')
 
@@ -855,12 +856,13 @@ def _render_compare_step(
             for r in dim_rows:
                 o_val = r["our_value"] or "—"
                 c_val = r["comp_value"] or "—"
-                diff_cls = ' row-diff' if r["advantage"] in ("당사우위", "타사우위") else ''
+                adv = r["advantage"]
+                diff_cls = ' row-diff' if adv in ("당사우위", "타사우위") else ''
                 rows2.append(
                     f'<tr><td class="row-label cell-clamp">{r["benefit"]}</td>'
                     f'<td class="col-our-cell{diff_cls}"><div class="cell-clamp">{o_val}</div></td>'
                     f'<td class="col-comp-cell{diff_cls}"><div class="cell-clamp">{c_val}</div></td>'
-                    f'<td class="col-status">{_status_html(r["advantage"])}</td></tr>'
+                    f'<td class="col-status">{_status_html(adv)}</td></tr>'
                 )
             st.markdown(
                 f'<table class="tbl"><colgroup><col style="width:35%"><col style="width:22%"><col style="width:22%"><col style="width:90px"></colgroup><thead>{thead2}</thead><tbody>{"".join(rows2)}</tbody></table>',

@@ -6,22 +6,28 @@
   },
   "payment_freq": {
     "type": "display_only",
-    "label": "지급횟수"
+    "label": "지급조건",
+    "comment": "매년/매월/매회 등 자유 텍스트 — 방향 없음, 표시만"
   },
   "payment_limit": {
-    "type": "display_only",
-    "label": "지급한도"
+    "type": "limit_numeric",
+    "higher_is_better": true,
+    "label": "지급한도",
+    "comment": "최대 N년 / 최초 N회 / 연간 N회. 같은 단위끼리만 숫자 비교. 단위 다르면 비교불가"
   },
   "reduction_rule": {
-    "type": "display_only",
-    "label": "감액조건"
+    "type": "none_is_better",
+    "label": "감액조건",
+    "comment": "없을수록 유리. 있으면 표시, 텍스트 비교는 의미없어 비교불가"
   },
   "start_condition": {
     "type": "display_only",
-    "label": "보장개시"
+    "label": "보장개시",
+    "comment": "자유 텍스트 — 방향 없음, 표시만"
   },
   "trigger": {
     "type": "display_only",
-    "label": "지급사유"
+    "label": "지급사유",
+    "comment": "자유 텍스트 — 방향 없음, 표시만"
   }
 }

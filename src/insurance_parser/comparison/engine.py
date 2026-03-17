@@ -87,6 +87,36 @@ class ComparisonResult:
 
 _RE_NUMBER = re.compile(r"[\d,]+")
 _RE_AMOUNT_WON = re.compile(r"([\d,]+)\s*만\s*원")
+# 지급한도 파싱: "최대 N년", "최초 N회", "연간 N회" 등에서 단위와 숫자 추출
+_RE_LIMIT = re.compile(r"(\d+)\s*(년|회)")
+_RE_LIMIT_UNIT_LABEL = re.compile(r"(최대|최초|연간|매년|매회)")
+
+
+def _parse_limit(text: str) -> tuple[str | None, int | None]:
+    """지급한도 문자열 파싱 → (단위_키, 숫자).
+
+    '최대 5년' → ('년', 5)
+    '최초 1회' → ('최초_회', 1)   — 최초와 연간은 의미가 달라 다른 단위로 취급
+    '연간 1회' → ('연간_회', 1)
+    '연간1회'  → ('연간_회', 1)
+    파싱 실패 → (None, None)
+    """
+    if not text:
+        return None, None
+    normalized = re.sub(r"\s+", "", text)
+    m = _RE_LIMIT.search(normalized)
+    if not m:
+        return None, None
+    num = int(m.group(1))
+    unit_raw = m.group(2)  # '년' or '회'
+    if unit_raw == "년":
+        return "년", num
+    # 회: 최초/연간/매 구분
+    if "최초" in normalized:
+        return "최초_회", num
+    if "연간" in normalized or "매년" in normalized:
+        return "연간_회", num
+    return "회", num
 
 
 def _parse_amount_won(text: str) -> int | None:
@@ -116,14 +146,15 @@ def _compare_slot(
 
     rule_type = rule.get("type", "display_only")
 
-    # rank/none_is_better 타입은 한쪽이 비어있어도 비교불가 (정보 없음 ≠ 열등)
-    # numeric 타입만 한쪽 비어있으면 우위 판정
-    if rule_type == "numeric":
+    # numeric / limit_numeric: 한쪽 비어있으면 있는 쪽 우위
+    # none_is_better: 비어있는 쪽이 유리 → 아래 분기에서 처리
+    # rank / display_only: 한쪽 비어있으면 비교불가
+    if rule_type in ("numeric", "limit_numeric"):
         if not our_val:
             return "타사우위"
         if not comp_val:
             return "당사우위"
-    else:
+    elif rule_type != "none_is_better":
         if not our_val or not comp_val:
             return "비교불가"
 
@@ -161,10 +192,35 @@ def _compare_slot(
             return "당사우위"
         if comp_empty:
             return "타사우위"
-        return "동일" if our_val.strip() == comp_val.strip() else "비교불가"
+        # 둘 다 있으면: 내용 비교 시도 (감액기간 숫자 추출)
+        our_num = _parse_amount_won(our_val)
+        comp_num = _parse_amount_won(comp_val)
+        if our_num is not None and comp_num is not None:
+            # 감액기간: 숫자 클수록 불리 (1년 감액 > 2년 감액은 2년이 더 불리)
+            if our_num == comp_num:
+                return "동일"
+            return "당사우위" if our_num < comp_num else "타사우위"
+        # 숫자 추출 실패 시: 텍스트가 같으면 동일, 다르면 표시만
+        return "동일" if re.sub(r"\s+", "", our_val) == re.sub(r"\s+", "", comp_val) else "비교불가"
 
-    # display_only
-    return "동일" if our_val.strip() == comp_val.strip() else "상이"
+    if rule_type == "limit_numeric":
+        # 단위 추출 후 같은 단위끼리만 숫자 비교
+        our_unit, our_num = _parse_limit(our_val)
+        comp_unit, comp_num = _parse_limit(comp_val)
+        if our_unit is None or comp_unit is None:
+            return "동일" if re.sub(r"\s+", "", our_val) == re.sub(r"\s+", "", comp_val) else "비교불가"
+        if our_unit != comp_unit:
+            # 단위 다름 (예: 년 vs 회) — 비교 불가
+            return "비교불가"
+        if our_num == comp_num:
+            return "동일"
+        higher = rule.get("higher_is_better", True)
+        if higher:
+            return "당사우위" if our_num > comp_num else "타사우위"
+        return "당사우위" if our_num < comp_num else "타사우위"
+
+    # display_only — 표시만, 판정 없음
+    return "동일" if re.sub(r"\s+", "", our_val) == re.sub(r"\s+", "", comp_val) else "표시"
 
 
 def _find_rank(value: str, rank_list: list[str]) -> int | None:
@@ -455,12 +511,13 @@ def _compare_pair(pair: MatchedPair, rules: dict) -> ComparedPair:
             continue
         our_val = _get_slot_val(pair.our_row, dim)
         comp_val = _get_slot_val(pair.comp_row, dim)
+        adv_slot = _compare_slot(dim, our_val, comp_val, rule)
         slot_comparisons.append(SlotComparison(
             dimension=dim,
             label=rule.get("label", dim),
             our_value=our_val,
             comp_value=comp_val,
-            advantage="동일" if our_val.strip() == comp_val.strip() else "상이",
+            advantage=adv_slot,
         ))
 
     cp.slot_comparisons = slot_comparisons
