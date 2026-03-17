@@ -214,13 +214,24 @@ def _get_slot_val(row: dict | None, slot_key: str) -> str:
 
 
 def _shorten_condition(cond: str) -> str:
-    """조건 문자열에서 기간 키워드만 추출. 추출 불가 시 앞 15자 truncate."""
+    """조건 문자열에서 기간 키워드만 추출. 추출 불가 시 앞 15자 truncate.
+
+    공백이 불규칙하게 들어오는 경우(예: '계약일 부터 2년 이내')도 처리하기 위해
+    먼저 공백을 정규화한 뒤 패턴 매칭.
+    '2년 후' -> '2년이후' 로 표준화.
+    """
     if not cond:
         return ""
-    m = _RE_PERIOD_SHORT.search(cond)
+    # 공백 정규화 (연속 공백 → 단일 공백, 양끝 제거)
+    normalized = re.sub(r"\s+", " ", cond).strip()
+    m = _RE_PERIOD_SHORT.search(normalized)
     if m:
-        return m.group(1).replace(" ", "")
-    return cond[:15].rstrip() + ("…" if len(cond) > 15 else "")
+        result = m.group(1).replace(" ", "")
+        # '2년후' → '2년이후' 표준화
+        if result.endswith("후") and not result.endswith("이후"):
+            result = result[:-1] + "이후"
+        return result
+    return normalized[:15].rstrip() + ("…" if len(normalized) > 15 else "")
 
 
 def _build_amount_display(row: dict | None) -> str:
@@ -280,8 +291,8 @@ _RE_PERIOD_LIMIT = re.compile(
 )
 # 지급 주기 패턴 (판정에서 조건으로 취급 안 함)
 _RE_PERIODIC = re.compile(r"매년|매월|매회|연간|연\s*\d+회|매\s*\d+년")
-# 표시용 조건 단축 패턴 (기간 키워드만 추출)
-_RE_PERIOD_SHORT = re.compile(r"(\d+년\s*(?:미만|이상|이내|이후|초과))")
+# 표시용 조건 단축 패턴 (기간 키워드만 추출, 공백 포함 변형 및 '후' 단독 케이스 대응)
+_RE_PERIOD_SHORT = re.compile(r"(\d+년\s*(?:미만|이상|이내|이후|초과|후))")
 
 
 @dataclass
