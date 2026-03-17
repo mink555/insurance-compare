@@ -135,6 +135,7 @@ def canonical_key(benefit_name: str) -> str:
     1. 정규화 (공백/괄호/특수문자 제거)
     2. type 접미사 제거 (자금/보험금/급여금 — 회사별 명명 차이일 뿐)
     3. condition | disease | action 슬롯 추출
+       - stripped 텍스트 우선, 슬롯 없으면 norm(접미사 제거 전)으로 재시도
     4. 빈 슬롯 제외하고 '|'로 결합
 
     >>> canonical_key("비급여(전액본인부담 포함) 항암약물 ·방사선치료자금")
@@ -148,7 +149,13 @@ def canonical_key(benefit_name: str) -> str:
 
     slots: list[str] = []
     for cat in _KEY_SLOTS:
-        val = _extract_slot(stripped, cat)
+        # action 슬롯은 type suffix 제거 전 norm으로도 재시도
+        # (예: '항암치료비' → stripped='항암', norm에서 '항암치료비' variant 매칭)
+        # condition/disease는 stripped만 사용 (norm fallback 시 '급여금' → '급여' 오탐 방지)
+        if cat == "action":
+            val = _extract_slot(stripped, cat) or _extract_slot(norm, cat)
+        else:
+            val = _extract_slot(stripped, cat)
         if val:
             slots.append(val)
 
@@ -200,7 +207,7 @@ def match_benefits(our_rows: list[dict], comp_rows: list[dict]) -> MatchResult:
     our_map = _build_key_map(our_rows)
     comp_map = _build_key_map(comp_rows)
 
-    all_keys = dict.fromkeys(list(our_map.keys()) + list(comp_map.keys()))
+    all_keys = dict.fromkeys(list(our_map) + list(comp_map))
 
     pairs: list[MatchedPair] = []
     matched = 0

@@ -234,12 +234,14 @@ class ArtifactStore:
 
     def list_companies(self) -> list[str]:
         rows = self.load_all()
-        seen: list[str] = []
+        seen: set[str] = set()
+        result: list[str] = []
         for r in rows:
             c = r.get("insurer", "")
             if c and c not in seen:
-                seen.append(c)
-        return seen
+                seen.add(c)
+                result.append(c)
+        return result
 
     def get_by_company(self, company_name: str) -> list[dict]:
         return [r for r in self.load_all() if r.get("insurer") == company_name]

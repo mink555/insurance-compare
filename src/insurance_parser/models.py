@@ -12,22 +12,6 @@ from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
-# PDF 추출 결과
-# ---------------------------------------------------------------------------
-
-class ExtractionResult(BaseModel):
-    """PDF 추출 단계 결과"""
-    source_path: str
-    backend: str = ""           # pymupdf
-    markdown: str = ""
-    total_pages: int = 0
-    tables_found: int = 0
-    success: bool = True
-    error: str = ""
-    elapsed_seconds: float = 0.0
-
-
-# ---------------------------------------------------------------------------
 # 상품 번들 모델
 # ---------------------------------------------------------------------------
 

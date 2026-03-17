@@ -91,10 +91,12 @@ _RE_AMOUNT_WON = re.compile(r"([\d,]+)\s*만\s*원")
 
 def _parse_amount_won(text: str) -> int | None:
     """금액 문자열에서 원 단위 숫자 추출. '1,000만원' → 10000000."""
+    if not text:
+        return None
     m = _RE_AMOUNT_WON.search(text)
     if m:
         return int(m.group(1).replace(",", "")) * 10000
-    nums = _RE_NUMBER.findall(text)
+    nums = [n for n in _RE_NUMBER.findall(text) if n.replace(",", "")]
     if nums:
         val = int(nums[0].replace(",", ""))
         if val > 0:
@@ -111,12 +113,19 @@ def _compare_slot(
     """단일 슬롯 비교 → 우위 판정."""
     if not our_val and not comp_val:
         return "비교불가"
-    if not our_val:
-        return "타사우위"
-    if not comp_val:
-        return "당사우위"
 
     rule_type = rule.get("type", "display_only")
+
+    # rank/none_is_better 타입은 한쪽이 비어있어도 비교불가 (정보 없음 ≠ 열등)
+    # numeric 타입만 한쪽 비어있으면 우위 판정
+    if rule_type == "numeric":
+        if not our_val:
+            return "타사우위"
+        if not comp_val:
+            return "당사우위"
+    else:
+        if not our_val or not comp_val:
+            return "비교불가"
 
     if rule_type == "numeric":
         our_num = _parse_amount_won(our_val)
@@ -195,8 +204,9 @@ def _get_slot_val(row: dict | None, slot_key: str) -> str:
         "payment_freq": "amount_condition",
         "payment_limit": "coverage_limit",
         "reduction_rule": "reduction_note",
-        "amount_display": "amount",
     }
+    if slot_key == "amount_display":
+        return _build_amount_display(row)
     raw_field = _FALLBACK.get(slot_key, "")
     if raw_field:
         return str(row.get(raw_field, ""))
@@ -212,6 +222,171 @@ def _build_amount_display(row: dict | None) -> str:
     if cond and amt and cond not in amt:
         return f"{cond} {amt}"
     return amt
+
+
+# ---------------------------------------------------------------------------
+# AmountInfo: 조건 인식 금액 파싱
+# ---------------------------------------------------------------------------
+
+# 기간 제한 조건 패턴 (1년미만, 2년이내, 계약일부터 N년 이내 등)
+_RE_PERIOD_LIMIT = re.compile(
+    r"(\d+년\s*(미만|이내|이전|이후))|"
+    r"(최초\s*계약.*?\d+년\s*(이내|이전|이후))|"
+    r"(계약일부터\s*\d+년)"
+)
+# 지급 주기 패턴 (판정에서 조건으로 취급 안 함)
+_RE_PERIODIC = re.compile(r"매년|매월|매회|연간|연\s*\d+회|매\s*\d+년")
+
+
+@dataclass
+class AmountInfo:
+    """비교 판정용 금액 파싱 결과."""
+    value: int | None       # 비교 대표 금액 (만원 단위, None이면 숫자 파싱 불가)
+    is_conditional: bool    # True = 기간/조건부 지급 (1년미만, 2년이내 등)
+    condition_note: str     # 조건 요약 문자열 (rationale 표시용)
+    max_value: int | None   # amount_detail에 있는 최대 금액 (1년이상 등 더 유리한 조건)
+    max_condition: str      # max_value에 해당하는 조건 문자열
+
+
+def _parse_amount_detail(row: dict | None) -> list[dict]:
+    """amount_detail JSON 파싱. 실패 시 빈 리스트."""
+    if not row:
+        return []
+    detail_raw = row.get("amount_detail", "")
+    if not detail_raw:
+        return []
+    try:
+        detail = json.loads(detail_raw) if isinstance(detail_raw, str) else detail_raw
+        return detail if isinstance(detail, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _extract_amount_info(row: dict | None) -> AmountInfo:
+    """row에서 AmountInfo를 추출한다.
+
+    판정 원칙:
+    - amount_condition이 비어있거나 순수 주기성("매년", "매회")이면 조건 없는 금액
+    - "1년미만", "2년이내", "계약일부터 N년 이내" 등 기간 제한이면 조건부
+    - 조건부인 경우 amount_detail에서 가장 유리한(최대) 금액도 추출
+    """
+    if not row:
+        return AmountInfo(value=None, is_conditional=False, condition_note="",
+                          max_value=None, max_condition="")
+
+    main_amt_str = row.get("amount", "")
+    main_cond = row.get("amount_condition", "").strip()
+
+    # 조건 판별
+    is_conditional = False
+    condition_note = ""
+    if main_cond:
+        if _RE_PERIOD_LIMIT.search(main_cond):
+            is_conditional = True
+            # 조건 요약: 첫 20자 이내로 압축
+            condition_note = main_cond[:30].rstrip()
+        elif not _RE_PERIODIC.search(main_cond):
+            # 주기 패턴이 아닌 기타 조건 → 조건부로 취급
+            is_conditional = True
+            condition_note = main_cond[:30].rstrip()
+
+    # 대표 비교 금액 추출
+    value = _parse_amount_won(main_amt_str)
+
+    # amount_detail에서 최대 금액 탐색
+    max_value: int | None = None
+    max_condition: str = ""
+    detail = _parse_amount_detail(row)
+
+    if detail:
+        best_val: int | None = None
+        best_cond: str = ""
+        for d in detail:
+            d_amt = _parse_amount_won(d.get("amount", ""))
+            d_cond = d.get("condition", "").strip()
+            if d_amt is not None:
+                if best_val is None or d_amt > best_val:
+                    best_val = d_amt
+                    best_cond = d_cond
+        max_value = best_val
+        max_condition = best_cond
+
+        # 조건부인 경우 detail의 최대 금액을 대표 비교값으로 사용
+        if is_conditional and max_value is not None:
+            value = max_value
+
+    return AmountInfo(
+        value=value,
+        is_conditional=is_conditional,
+        condition_note=condition_note,
+        max_value=max_value,
+        max_condition=max_condition,
+    )
+
+
+def _compare_amounts(our: AmountInfo, comp: AmountInfo) -> tuple[str, str]:
+    """두 AmountInfo를 비교하여 (advantage, rationale)을 반환.
+
+    판정 계층:
+    1. 둘 다 숫자 없음 → 비교불가
+    2. 금액 비교 (조건부면 detail 최대값 기준)
+    3. 금액이 같으면 조건 유무로 추가 판정
+       - 한쪽 조건 없음, 다른쪽 조건부 → 조건 없는쪽 우위
+       - 둘 다 조건부지만 조건이 다름 → 조건상이
+    """
+    our_v = our.value
+    comp_v = comp.value
+
+    if our_v is None and comp_v is None:
+        return "비교불가", ""
+
+    if our_v is None:
+        return "타사우위", "금액↓"
+    if comp_v is None:
+        return "당사우위", "금액↑"
+
+    # 금액 비교
+    if our_v > comp_v:
+        adv = "당사우위"
+        amt_note = "금액↑"
+    elif our_v < comp_v:
+        adv = "타사우위"
+        amt_note = "금액↓"
+    else:
+        adv = "동일"
+        amt_note = ""
+
+    # 조건 차이 반영
+    our_cond_tag = f"({our.condition_note})" if our.is_conditional and our.condition_note else ""
+    comp_cond_tag = f"({comp.condition_note})" if comp.is_conditional and comp.condition_note else ""
+
+    if adv == "동일":
+        # 금액이 같을 때
+        if our.is_conditional == comp.is_conditional:
+            # 둘 다 조건부 & 조건이 다를 때 → 조건상이
+            if our.is_conditional and our.condition_note != comp.condition_note:
+                return "조건상이", f"당사{our_cond_tag} / 타사{comp_cond_tag}"
+            return "동일", ""
+        # 한쪽만 조건부
+        if not our.is_conditional:
+            return "당사우위", f"조건없음 (타사{comp_cond_tag})"
+        else:
+            return "타사우위", f"조건없음 (당사{our_cond_tag})"
+    else:
+        # 금액이 다를 때: 조건 정보를 rationale에 추가
+        cond_note = ""
+        if our.is_conditional or comp.is_conditional:
+            parts = []
+            if our.is_conditional:
+                parts.append(f"당사{our_cond_tag}")
+            if comp.is_conditional:
+                parts.append(f"타사{comp_cond_tag}")
+            cond_note = " · ".join(parts)
+
+        rationale = amt_note
+        if cond_note:
+            rationale = f"{amt_note} · {cond_note}"
+        return adv, rationale
 
 
 def _compare_pair(pair: MatchedPair, rules: dict) -> ComparedPair:
@@ -232,28 +407,30 @@ def _compare_pair(pair: MatchedPair, rules: dict) -> ComparedPair:
         return cp
 
     slot_comparisons: list[SlotComparison] = []
-    advantages: list[str] = []
+    amt_rule = rules.get("amount_display", {"type": "numeric", "higher_is_better": True, "label": "금액"})
 
-    for dim, rule in rules.items():
-        if rule.get("type") == "display_only":
-            continue
-        our_val = _get_slot_val(pair.our_row, dim)
-        comp_val = _get_slot_val(pair.comp_row, dim)
-        adv = _compare_slot(dim, our_val, comp_val, rule)
-        sc = SlotComparison(
-            dimension=dim,
-            label=rule.get("label", dim),
-            our_value=our_val,
-            comp_value=comp_val,
-            advantage=adv,
-        )
-        slot_comparisons.append(sc)
-        if adv in ("당사우위", "타사우위"):
-            advantages.append(adv)
+    # ── 금액 판정 (AmountInfo 기반) ──
+    our_info = _extract_amount_info(pair.our_row)
+    comp_info = _extract_amount_info(pair.comp_row)
+    adv, rationale = _compare_amounts(our_info, comp_info)
 
-    # display_only 슬롯도 추가 (비교 판정 없이)
+    cp.overall_advantage = adv
+    cp.rationale = rationale
+
+    # SlotComparison용 표시 값: 조건부면 detail 최대값 기준 금액 사용
+    our_display_val = _build_amount_display(pair.our_row)
+    comp_display_val = _build_amount_display(pair.comp_row)
+    slot_comparisons.append(SlotComparison(
+        dimension="amount_display",
+        label=amt_rule.get("label", "금액"),
+        our_value=our_display_val,
+        comp_value=comp_display_val,
+        advantage=adv,
+    ))
+
+    # ── 나머지 슬롯은 display_only로 참고 표시 ──
     for dim, rule in rules.items():
-        if rule.get("type") != "display_only":
+        if dim == "amount_display":
             continue
         our_val = _get_slot_val(pair.our_row, dim)
         comp_val = _get_slot_val(pair.comp_row, dim)
@@ -266,22 +443,6 @@ def _compare_pair(pair: MatchedPair, rules: dict) -> ComparedPair:
         ))
 
     cp.slot_comparisons = slot_comparisons
-
-    our_wins = advantages.count("당사우위")
-    comp_wins = advantages.count("타사우위")
-    if our_wins > comp_wins:
-        cp.overall_advantage = "당사우위"
-    elif comp_wins > our_wins:
-        cp.overall_advantage = "타사우위"
-    elif our_wins == 0:
-        cp.overall_advantage = "동일"
-    else:
-        amt_sc = next((s for s in slot_comparisons if s.dimension == "amount_display"), None)
-        if amt_sc and amt_sc.advantage == "동일":
-            cp.overall_advantage = "조건상이"
-        else:
-            cp.overall_advantage = "금액상이"
-
     return cp
 
 

@@ -54,6 +54,8 @@ from typing import Optional
 
 import fitz  # PyMuPDF
 
+from .utils import clean as _clean, normalize_benefit_name as _normalize_benefit_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,14 +87,6 @@ RE_NOTE_NUM = re.compile(r"^\s*\(?\d{1,2}\)?\s*\d?\s*\.")
 
 def _clean(text: str) -> str:
     return re.sub(r"[ \t\n]+", " ", text or "").strip()
-
-
-def _normalize_benefit_name(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r"(?<=[가-힣A-Za-z0-9\)])\n(?=[가-힣A-Za-z0-9\(])", "", text)
-    text = re.sub(r"[ \t\n]+", " ", text)
-    return text.strip()
 
 
 def _normalize_amount(text: str) -> str:

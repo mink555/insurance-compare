@@ -318,7 +318,8 @@ _COMPARISON_GROUP_KEY_FIELDS = (
     "product_name",
     "contract_name",
     "benefit_name",
-    "benefit_category",       # diagnosis/surgery/treatment/…
+    # benefit_category 제외: 같은 급부명이 질병군에 따라 다른 카테고리로 분류되어도
+    # 비교 단위는 급부명 기준으로 1행으로 집약 (조건별 금액은 amount_detail에 표시)
     "renewal_type",           # 갱신형/비갱신형
     "coverage_limit",         # 최초1회/연간N회/…
 )

@@ -46,35 +46,9 @@ from typing import Optional
 
 import fitz  # PyMuPDF
 
+from .utils import clean as _clean, normalize_benefit_name as _normalize_benefit_name
+
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# 유틸리티
-# ---------------------------------------------------------------------------
-
-def _clean(text: str) -> str:
-    """범용 정리: 연속 공백·탭·줄바꿈 → 단일 공백."""
-    return re.sub(r"[ \t\n]+", " ", text or "").strip()
-
-
-def _normalize_benefit_name(text: str) -> str:
-    """급부명 전용 정규화: 셀 내 줄바꿈으로 쪼개진 단어를 이어붙인다.
-
-    find_tables()는 셀 내 텍스트를 줄바꿈(\n)으로 반환하는데,
-    한글·영숫자 단어 중간에서 쪼개진 경우만 제거하고
-    단어 사이의 공백·줄바꿈은 유지한다.
-
-    예: "유방암/전립\n선암 치료보\n험금" → "유방암/전립선암 치료보험금"
-    예: "갑상선암\n∙\n기타피부암" → "갑상선암 ∙ 기타피부암"  (구분자 앞뒤는 유지)
-    """
-    if not text:
-        return ""
-    # 한글·영문·숫자·괄호 문자 사이의 \n 만 제거 (단어 중간 쪼개짐)
-    text = re.sub(r"(?<=[가-힣A-Za-z0-9\)])\n(?=[가-힣A-Za-z0-9\(])", "", text)
-    # 나머지 연속 공백/줄바꿈 → 공백
-    text = re.sub(r"[ \t\n]+", " ", text)
-    return text.strip()
 
 
 def _normalize_note_text(text: str) -> str:

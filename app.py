@@ -194,18 +194,24 @@ section[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.06) !impor
 /* ── Inputs / Buttons (main area) ── */
 .stButton > button[kind="primary"] {
   background: var(--teal-500) !important; color: #fff !important; border: none !important;
-  border-radius: var(--r-sm) !important; padding: var(--sp-2) var(--sp-5) !important; font-weight: 600 !important;
-  font-size: var(--fs-md) !important; box-shadow: var(--shadow-1); transition: all .15s;
+  border-radius: var(--r-full) !important; padding: 8px 20px !important; font-weight: 600 !important;
+  font-size: 13px !important; letter-spacing: -.01em !important;
+  box-shadow: var(--shadow-1) !important; transition: all .15s !important;
+  white-space: nowrap !important; height: 36px !important;
 }
 .stButton > button[kind="primary"]:hover {
-  background: var(--teal-600) !important; box-shadow: var(--shadow-2);
+  background: var(--teal-600) !important; box-shadow: var(--shadow-2) !important;
 }
 .stButton > button {
-  border-radius: var(--r-sm) !important; font-size: var(--fs-sm) !important;
-  border: 1px solid var(--g2) !important; padding: var(--sp-2) var(--sp-4) !important;
-  color: var(--g7) !important; background: var(--w) !important; transition: all .15s;
+  border-radius: var(--r-full) !important; font-size: 13px !important;
+  border: 1px solid var(--g2) !important; padding: 8px 20px !important;
+  color: var(--g6) !important; background: var(--w) !important; transition: all .15s !important;
+  white-space: nowrap !important; font-weight: 500 !important;
+  height: 36px !important; letter-spacing: -.01em !important;
 }
-.stButton > button:hover { border-color: var(--g3) !important; background: var(--g0) !important; }
+.stButton > button:hover {
+  border-color: var(--g3) !important; color: var(--g8) !important; background: var(--g0) !important;
+}
 
 .stSelectbox > div > div, .stMultiSelect > div > div {
   border-radius: var(--r-sm) !important; border-color: var(--g2) !important;
@@ -225,13 +231,40 @@ section[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.06) !impor
 div[data-testid="stExpander"] { border: 1px solid var(--g2) !important; border-radius: var(--r-sm) !important; background: var(--w); overflow: hidden; margin-bottom: 0 !important; }
 div[data-testid="stExpander"] summary { font-size: var(--fs-xs) !important; font-weight: 500; color: var(--g5) !important; padding: var(--sp-2) var(--sp-3) !important; }
 
-div[data-testid="stDownloadButton"] > button { font-size: var(--fs-xs) !important; padding: var(--sp-2) var(--sp-4) !important; border: 1px solid var(--g2) !important; background: var(--w) !important; color: var(--g6) !important; border-radius: var(--r-sm) !important; }
+div[data-testid="stDownloadButton"] > button {
+  font-size: 13px !important; padding: 8px 20px !important;
+  border: 1px solid var(--g2) !important; background: var(--w) !important;
+  color: var(--g6) !important; border-radius: var(--r-full) !important;
+  white-space: nowrap !important; font-weight: 500 !important;
+  height: 36px !important; letter-spacing: -.01em !important;
+  transition: all .15s !important;
+}
+div[data-testid="stDownloadButton"] > button:hover {
+  border-color: var(--g3) !important; color: var(--g8) !important;
+  background: var(--g0) !important;
+}
+
+/* 메인 영역 일반 버튼: 콘텐츠 크기만큼만 */
+.stButton > button { width: auto !important; }
+div[data-testid="stDownloadButton"] > button { width: auto !important; }
+/* 사이드바 버튼은 전체 너비 유지 */
+section[data-testid="stSidebar"] .stButton > button { width: 100% !important; }
+/* 컬럼 내 버튼 wrapper가 버튼을 늘리지 않도록 */
+[data-testid="column"] > div:has(> .stButton),
+[data-testid="column"] > div:has(> div[data-testid="stDownloadButton"]) {
+  display: flex !important; align-items: flex-start !important;
+}
 
 /* ══════════════════════════════════════════════
    E. SPACING
    ══════════════════════════════════════════════ */
-div[data-testid="stVerticalBlock"] { gap: var(--sp-2) !important; }
+div[data-testid="stVerticalBlock"] { gap: var(--sp-4) !important; }
 div[data-testid="stHorizontalBlock"] { gap: var(--sp-4) !important; }
+/* 사이드바 내부는 좁게 */
+section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] { gap: var(--sp-3) !important; }
+/* 익스팬더 내부, 탭 내부는 좁게 */
+div[data-testid="stExpander"] div[data-testid="stVerticalBlock"],
+div[data-testid="stTabPanel"] div[data-testid="stVerticalBlock"] { gap: var(--sp-2) !important; }
 
 /* ══════════════════════════════════════════════
    F. BADGES
@@ -249,6 +282,7 @@ div[data-testid="stHorizontalBlock"] { gap: var(--sp-4) !important; }
 .status-both-diff { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--r-full); font-size: 10px; font-weight: 600; background: #FEF3C7; color: var(--amber-700); border: 1px solid #FDE68A; white-space: nowrap; }
 .status-only-our  { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--r-full); font-size: 10px; font-weight: 600; background: var(--teal-100); color: var(--teal-700); border: 1px solid var(--teal-200); white-space: nowrap; }
 .status-only-comp { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--r-full); font-size: 10px; font-weight: 600; background: var(--comp-100); color: var(--comp-700); border: 1px solid var(--comp-200); white-space: nowrap; }
+.status-unknown   { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--r-full); font-size: 10px; font-weight: 600; background: var(--g2); color: var(--g6); border: 1px solid var(--g3); white-space: nowrap; }
 
 /* ══════════════════════════════════════════════
    G. STEP INDICATOR — horizontal stepper with lines
@@ -318,14 +352,14 @@ div[data-testid="stHorizontalBlock"] { gap: var(--sp-4) !important; }
 .tbl tbody tr:last-child td, .rpt-tbl tbody tr:last-child td,
 .ev-tbl tr:last-child td, .cmp-tbl tr:last-child td { border-bottom: none; }
 .tbl tbody tr:hover, .rpt-tbl tbody tr:hover { background: var(--g0); }
-.tbl .row-label, .rpt-tbl .row-label { font-weight: 600; color: var(--g8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tbl .row-label, .rpt-tbl .row-label { font-weight: 600; color: var(--g8); white-space: normal; word-break: keep-all; }
 .tbl .col-our-cell { background: rgba(204,251,241,.06); }
 .tbl .col-comp-cell { background: rgba(254,226,226,.04); }
 .tbl .col-status, .rpt-tbl .col-status { min-width: 90px; text-align: center; white-space: normal; vertical-align: middle; }
 .tbl td.row-diff { background: rgba(251,191,36,.04); }
 .rationale { font-size: 11px; color: var(--g5); font-weight: 400; margin-top: 3px; line-height: 1.4; white-space: normal; word-break: keep-all; }
 
-.cell-clamp { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.5; }
+.cell-clamp { white-space: normal; word-break: keep-all; line-height: 1.5; }
 .cell-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; max-height: 4.4em; line-height: 1.45; }
 .text-muted { color: var(--g4); }
 .text-our { color: var(--teal-700); font-weight: 600; }
@@ -457,7 +491,8 @@ div[data-testid="stHorizontalBlock"] { gap: var(--sp-4) !important; }
 .setup-preview-meta { margin: var(--sp-2) 0; font-size: var(--fs-xs); color: var(--g5); }
 .setup-preview-empty { text-align: center; padding: var(--sp-6); font-size: var(--fs-sm); color: var(--g4); }
 .setup-vs { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 18px; font-weight: 900; color: var(--g3); }
-.setup-btn-wrap { text-align: center; margin: var(--sp-6) 0 var(--sp-2); }
+.setup-btn-wrap { text-align: center; margin: var(--sp-5) 0 var(--sp-3); }
+.setup-btn-wrap .stButton > button { min-width: 160px !important; width: 100% !important; height: 44px !important; font-size: 15px !important; }
 .setup-hint { text-align: center; font-size: var(--fs-xs); color: var(--g4); margin-top: var(--sp-2); }
 
 /* ══════════════════════════════════════════════

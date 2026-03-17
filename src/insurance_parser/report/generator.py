@@ -11,7 +11,7 @@
       2-4. 부가 보장
   3. 차별점 심층 분석    — 구조적 차이 + Evidence 근거
   4. 특약 상품 개발 제언  — 경쟁력 평가·개선 포인트
-  부록. Evidence 목록  — [EN] ID별 약관 원문 청크
+  부록. Evidence 목록  — [E1], [E2], ... ID별 약관 원문 청크
 """
 from __future__ import annotations
 
@@ -138,6 +138,7 @@ class ComparisonReport:
     detail_base: list[dict] = field(default_factory=list)
     detail_comp: list[dict] = field(default_factory=list)
     evidences: list[Evidence] = field(default_factory=list)
+    _cached_markdown: str = field(default="", repr=False, compare=False)
 
     def _our_label(self) -> str:
         return self.base_label.split(" · ")[0] if self.base_label else "당사"
@@ -148,7 +149,7 @@ class ComparisonReport:
     # ── Evidence 수집 ────────────────────────────────────
 
     def _collect_evidence(self, collector: EvidenceCollector, row: dict, side: str) -> dict[str, str]:
-        """한 행의 주요 필드에서 Evidence를 수집, {field_name: "[EN]"} 반환."""
+        """한 행의 주요 필드에서 Evidence를 수집, {field_name: "[E1]"} 형태의 ID 반환."""
         bname = row.get("benefit_name", "")
         cname = row.get("contract_name", "")
         refs: dict[str, str] = {}
@@ -337,7 +338,6 @@ class ComparisonReport:
         lines.append(f"| 항목 | {our_l} | {comp_l} |")
         lines.append("|------|------|------|")
 
-        treat_cats = {"치료", "수술", "진단"}
         all_names = list(dict.fromkeys(
             list(base_map.keys()) + list(comp_map.keys())
         ))
@@ -571,6 +571,9 @@ class ComparisonReport:
 
     @property
     def full_markdown(self) -> str:
+        if self._cached_markdown:
+            return self._cached_markdown
+
         collector = EvidenceCollector()
 
         all_lines: list[str] = []
@@ -586,7 +589,8 @@ class ComparisonReport:
 
         all_lines.extend(self._evidence_appendix_lines())
 
-        return "\n".join(all_lines)
+        self._cached_markdown = "\n".join(all_lines)
+        return self._cached_markdown
 
     # ── CSV ─────────────────────────────────────────────
 

@@ -97,9 +97,9 @@ def _status_html(status: str) -> str:
         "타사우위": '<span class="status-only-comp">타사우위</span>',
         "당사단독": '<span class="status-only-our">당사단독</span>',
         "타사단독": '<span class="status-only-comp">타사단독</span>',
-        "비교불가": '<span class="badge badge-unknown">비교불가</span>',
+        "비교불가": '<span class="status-unknown">비교불가</span>',
     }
-    return mapping.get(status, f'<span class="badge badge-unknown">{status}</span>')
+    return mapping.get(status, f'<span class="status-unknown">{status}</span>')
 
 
 def _section_label(title: str) -> None:
@@ -131,10 +131,6 @@ def _init() -> None:
         with st.spinner("데이터 로딩 중..."):
             rows = _store.load_all()
             st.session_state["wb_df"] = pd.DataFrame(rows) if rows else pd.DataFrame()
-    if "wb_upload_log" not in st.session_state:
-        st.session_state["wb_upload_log"] = []
-    if "wb_step" not in st.session_state:
-        st.session_state["wb_step"] = "setup"
 
 
 def _df() -> pd.DataFrame:
@@ -166,51 +162,36 @@ def _riders_of(co: str, prod: str) -> list[str]:
     )
 
 
-def _filter(ctx: dict, side: str) -> pd.DataFrame:
-    """comparison_rows 집약 DataFrame 반환."""
+def _apply_filter_mask(ctx: dict, side: str) -> pd.DataFrame:
+    """ctx에서 회사/상품/특약 조건으로 마스킹된 원본 DataFrame 반환."""
     df = _df()
     if df.empty:
         return pd.DataFrame()
     co    = ctx.get(f"{side}_co", "")
     prod  = ctx.get(f"{side}_prod", "")
     rider = ctx.get(f"{side}_rider", "(전체)")
-
     if not co:
         return pd.DataFrame()
-
     mask = df["insurer"] == co
     if prod:
         mask &= df["product_name"] == prod
     if rider and rider != "(전체)":
         mask &= df["contract_name"] == rider
+    return df[mask]
 
-    detail = df[mask]
+
+def _filter(ctx: dict, side: str) -> pd.DataFrame:
+    """comparison_rows 집약 DataFrame 반환."""
+    detail = _apply_filter_mask(ctx, side)
     if detail.empty:
         return pd.DataFrame()
-
     rows = to_comparison_rows(detail.to_dict("records"))
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
 def _filter_detail(ctx: dict, side: str) -> pd.DataFrame:
     """원본 detail_rows DataFrame 반환."""
-    df = _df()
-    if df.empty:
-        return pd.DataFrame()
-    co    = ctx.get(f"{side}_co", "")
-    prod  = ctx.get(f"{side}_prod", "")
-    rider = ctx.get(f"{side}_rider", "(전체)")
-
-    if not co:
-        return pd.DataFrame()
-
-    mask = df["insurer"] == co
-    if prod:
-        mask &= df["product_name"] == prod
-    if rider and rider != "(전체)":
-        mask &= df["contract_name"] == rider
-
-    return df[mask].copy()
+    return _apply_filter_mask(ctx, side).copy()
 
 
 def _product_status(co: str, prod: str) -> str:
@@ -538,10 +519,11 @@ def _render_setup_step(ctx: dict) -> None:
         f'</div>',
         unsafe_allow_html=True,
     )
-    c1, c2, c3 = st.columns([2, 5, 2])
-    with c2:
+    st.markdown('<div class="setup-btn-wrap">', unsafe_allow_html=True)
+    _, btn_col, _ = st.columns([3, 2, 3])
+    with btn_col:
         if st.button(
-            "비교 분석 시작  →",
+            "비교 분석 시작 →",
             type="primary",
             disabled=not has_both,
             use_container_width=True,
@@ -549,6 +531,7 @@ def _render_setup_step(ctx: dict) -> None:
         ):
             st.session_state["wb_step"] = "compare"
             st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
     if not has_both:
         st.markdown(
@@ -971,14 +954,14 @@ def _render_compare_step(
 def _render_report_step(ctx: dict) -> None:
     """STEP 3: 리포트 전용 페이지."""
 
-    # 상단 내비
-    nav_c1, nav_c2, _ = st.columns([2, 2, 5])
-    with nav_c1:
+    # 상단 내비 — 버튼 4개를 한 행에 모두 배치 (내비 2 + 다운로드 2 + 여백)
+    b1, b2, b3, b4, _ = st.columns([2, 2, 2, 2, 4])
+    with b1:
         if st.button("← 비교 화면으로", key="btn_back_compare"):
             st.session_state["wb_step"] = "compare"
             st.rerun()
-    with nav_c2:
-        if st.button("리포트 재생성", key="btn_regen_report"):
+    with b2:
+        if st.button("↺ 리포트 재생성", key="btn_regen_report"):
             st.session_state["wb_report"] = None
             st.session_state["wb_step"] = "compare"
             st.rerun()
@@ -988,18 +971,16 @@ def _render_report_step(ctx: dict) -> None:
         st.info("리포트가 생성되지 않았습니다. 비교 화면에서 '리포트 생성' 버튼을 클릭해 주십시오.")
         return
 
-    # 다운로드 버튼
-    dl_c1, dl_c2, _ = st.columns([1, 1, 6])
-    with dl_c1:
+    with b3:
         st.download_button(
-            "마크다운 내보내기",
+            "⬇ Markdown",
             report.full_markdown.encode("utf-8"),
             "comparison_report.md", "text/markdown",
             key="dl_report_md",
         )
-    with dl_c2:
+    with b4:
         st.download_button(
-            "CSV 내보내기",
+            "⬇ CSV",
             report.csv.encode("utf-8-sig"),
             "comparison_report.csv", "text/csv",
             key="dl_report_csv",
@@ -1018,9 +999,10 @@ def _render_report_body(report, ctx: dict) -> None:
         return
 
     _build_tooltip_map(report)
+    ev_map = _build_ev_map(report)
     _render_rpt_hero(report, ctx)
-    _render_rpt_comparison(report)
-    _render_rpt_analysis(report)
+    _render_rpt_comparison(report, ev_map)
+    _render_rpt_analysis(report, ev_map)
     _render_rpt_evidence(report)
 
 
@@ -1127,8 +1109,7 @@ def _render_rpt_hero(report, ctx: dict) -> None:
 # §2 핵심 비교 (3개 서브테이블을 하나의 카드로)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def _render_rpt_comparison(report) -> None:
-    ev_map = _build_ev_map(report)
+def _render_rpt_comparison(report, ev_map: dict) -> None:
     our_l = report.base_label.split(" · ")[0] if report.base_label else "당사"
     comp_l = report.comp_label.split(" · ")[0] if report.comp_label else "타사"
 
@@ -1171,11 +1152,15 @@ def _render_rpt_comparison(report) -> None:
             diff_cls = ' row-diff' if row["status"] in ("당사우위", "타사우위", "금액상이", "조건상이") else ''
             rat = row.get("rationale", "")
             rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
+            our_eid = _find_eid(ev_map, "당사", "amount", row["our_name"])
+            comp_eid = _find_eid(ev_map, "타사", "amount", row["comp_name"])
+            our_amt_html = _cell_v(row["our_amount"] or "", our_eid)
+            comp_amt_html = _cell_v(row["comp_amount"] or "", comp_eid)
             a_rows.append(
                 f'<tr><td class="row-label cell-clamp">{row["our_name"]}</td>'
                 f'<td class="row-label cell-clamp">{row["comp_name"]}</td>'
-                f'<td class="text-our col-our-cell{diff_cls}">{row["our_amount"] or "—"}</td>'
-                f'<td class="text-comp col-comp-cell{diff_cls}">{row["comp_amount"] or "—"}</td>'
+                f'<td class="text-our col-our-cell{diff_cls}">{our_amt_html}</td>'
+                f'<td class="text-comp col-comp-cell{diff_cls}">{comp_amt_html}</td>'
                 f'<td class="col-status">{_status_html(row["status"])}{rat_html}</td></tr>'
             )
         cg5 = '<colgroup><col style="width:20%"><col style="width:20%"><col style="width:17%"><col style="width:17%"><col style="width:26%"></colgroup>'
@@ -1284,7 +1269,7 @@ def _build_deep_dive_facts(cr: ComparisonResult, our_l: str, comp_l: str) -> lis
     return sections
 
 
-def _render_rpt_analysis(report) -> None:
+def _render_rpt_analysis(report, ev_map: dict) -> None:
     our_l = report.base_label.split(" · ")[0] if report.base_label else "당사"
     comp_l = report.comp_label.split(" · ")[0] if report.comp_label else "타사"
     cr: ComparisonResult | None = st.session_state.get("wb_comparison_result")
@@ -1321,10 +1306,12 @@ def _render_rpt_analysis(report) -> None:
             for cp in diff_pairs[:10]:
                 rat = cp.rationale or ""
                 rat_html = f'<div class="rationale">{rat}</div>' if rat else ''
+                our_eid = _find_eid(ev_map, "당사", "amount", cp.our_name)
+                comp_eid = _find_eid(ev_map, "타사", "amount", cp.comp_name)
                 d_rows.append(
                     f'<tr><td class="row-label cell-clamp">{cp.our_name}</td>'
-                    f'<td class="text-our">{cp.our_amount or "—"}</td>'
-                    f'<td class="text-comp">{cp.comp_amount or "—"}</td>'
+                    f'<td class="text-our">{_cell_v(cp.our_amount or "", our_eid)}</td>'
+                    f'<td class="text-comp">{_cell_v(cp.comp_amount or "", comp_eid)}</td>'
                     f'<td class="col-status">{_status_html(cp.overall_advantage)}{rat_html}</td></tr>'
                 )
             cg4d = '<colgroup><col style="width:30%"><col style="width:20%"><col style="width:20%"><col style="width:30%"></colgroup>'
@@ -1352,7 +1339,7 @@ def _render_rpt_evidence(report) -> None:
         f'<div class="card-badge">{len(evidences)}건</div>'
         f'</div>'
         f'<div class="detail-meta">'
-        f'리포트 내 <span class="eid">[EN]</span> 태그에 마우스를 올리시면 약관 원문을 확인하실 수 있습니다.'
+        f'리포트 내 <span class="eid">[E1]</span> 형태의 태그에 마우스를 올리시면 약관 원문을 확인하실 수 있습니다.'
         f'</div></div>',
         unsafe_allow_html=True,
     )
@@ -1360,7 +1347,7 @@ def _render_rpt_evidence(report) -> None:
     our_evs = [ev for ev in evidences if ev.side == "당사"]
     comp_evs = [ev for ev in evidences if ev.side != "당사"]
 
-    def _ev_group(title: str, evs: list, color_cls: str, border_color: str):
+    def _ev_group(title: str, evs: list):
         if not evs:
             return
         with st.expander(f"{title} ({len(evs)}건)", expanded=False):
@@ -1384,8 +1371,8 @@ def _render_rpt_evidence(report) -> None:
                 unsafe_allow_html=True,
             )
 
-    _ev_group("당사 Evidence", our_evs, "our", "var(--our-200)")
-    _ev_group("타사 Evidence", comp_evs, "comp", "var(--comp-200)")
+    _ev_group("당사 Evidence", our_evs)
+    _ev_group("타사 Evidence", comp_evs)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
