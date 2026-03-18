@@ -31,9 +31,13 @@ app_port: 7860
 
 ![상품 비교 설정](docs/screenshot_compare_setup.png)
 
-**비교 결과** — 급부별 금액 및 보장 범위 비교
+**비교 결과 리포트** — Executive Summary · KEY SELLING POINTS 자동 생성
 
-![비교 결과](docs/screenshot_compare_result.png)
+![비교 결과 리포트](docs/screenshot_compare_result.png)
+
+**비교 상세** — 보장 범위·급부별 금액 비교 테이블
+
+![비교 상세](docs/screenshot_compare_detail.png)
 
 ---
 
