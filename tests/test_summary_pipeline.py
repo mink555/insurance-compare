@@ -750,7 +750,7 @@ class TestComparisonRows:
                     ["", "", "1년이상", "200만원"],
                 ]
 
-        benefits = _parse_benefit_table(_FakeTab(), "암보장N특약")
+        benefits = _parse_benefit_table(_FakeTab())
         assert len(benefits) == 3, f"질병군 분리 실패: {len(benefits)}개"
         for b in benefits:
             assert b["benefit_names"] == ["소액질병진단자금"]

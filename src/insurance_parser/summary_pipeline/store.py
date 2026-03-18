@@ -186,6 +186,26 @@ class ArtifactStore:
                 logger.warning("업로드 파일 로드 실패 %s: %s", path, e)
         return all_rows
 
+    def list_companies(self) -> list[str]:
+        """저장된 모든 artifact에서 회사명 목록을 반환한다."""
+        companies: list[str] = []
+        seen: set[str] = set()
+        for row in self.load_all():
+            name = row.get("insurer", "")
+            if name and name not in seen:
+                seen.add(name)
+                companies.append(name)
+        return companies
+
+    def list_upload_metas(self) -> list[dict]:
+        """업로드 artifact 파일들의 메타 정보 목록을 반환한다."""
+        metas: list[dict] = []
+        for path in sorted(self.base_dir.glob(f"{_UPLOAD_PREFIX}*.json")):
+            meta = self._read_meta(path)
+            if meta:
+                metas.append(meta)
+        return metas
+
     def load_all(self) -> list[dict]:
         """prebuilt + uploads 전체 로드. dedupe_key 기준 최종 중복 행 제거."""
         prebuilt = self.load_prebuilt()

@@ -29,12 +29,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from insurance_parser.parse.lina_summary_parser import (
-    _normalize_benefit_name,
     _normalize_note_text,
     _repair_broken_korean_phrases,
     _split_numbered_notes,
     _extract_notes_from_blocks,
 )
+from insurance_parser.parse.utils import normalize_benefit_name as _normalize_benefit_name
 
 
 # ===========================================================================
